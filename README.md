@@ -1,0 +1,147 @@
+# UGV - Ultra-Fast Genome Viewer
+
+A high-performance genome viewer built with Rust and egui, designed for interactive exploration of genomic data.
+
+## Features
+
+### Genome Visualization
+- **FASTA Support**: Load genome sequences in FASTA format (plain or gzipped)
+- **GFF/GTF Annotations**: Display gene features from GFF3/GTF files (plain or gzipped)
+- **Multi-track Display**:
+  - Position ruler with adaptive scaling
+  - GC content plot
+  - DNA sequence view (when zoomed in)
+  - Gene feature tracks with color-coding by type
+
+### Interactive Navigation
+- **Pan**: Click and drag to move along the chromosome
+- **Zoom**: Mouse scroll to zoom in/out (focus-aware zooming)
+- **Multi-chromosome Support**: Browse all chromosomes in the genome
+
+### Chromosome Management
+- **Search**: Filter chromosomes by name
+- **Sorting Options**:
+  - **Natural** (default): chr1, chr2, ..., chr10, ..., chrX, chrY, chrM
+  - **Alphabetical**: Sort by name A-Z
+  - **Size**: Sort by chromosome length (largest first)
+
+### Navigation and Search
+- **Position Search**: Jump to specific genomic positions
+  - Format: `chr1:100000` or just `100000` (uses current chromosome)
+  - Supports comma/underscore separators: `chr1:100,000` or `chr1:100_000`
+  - Press Enter or click "Jump" to navigate
+- **Feature Search**: Find genes and annotations by name
+  - Search by gene name, ID, or any GFF3 attribute
+  - Case-insensitive partial matching
+  - View all results in a popup window
+  - Click "Jump" on any result to navigate to that feature
+
+### Performance Features
+- Interval tree for efficient feature queries (O(log n))
+- On-the-fly gzip decompression
+- GPU-accelerated rendering via egui
+- Responsive viewport clipping
+
+### Feature Color Coding
+- **Gene**: Steel Blue
+- **mRNA/Transcript**: Light Blue
+- **Exon**: Forest Green
+- **CDS**: Orange
+- **UTR**: Yellow
+- **Intron**: Gray
+
+## Installation
+
+### Prerequisites
+- Rust 1.70 or later
+
+### Build from Source
+```bash
+git clone <repository-url>
+cd ugv
+cargo build --release
+```
+
+### Run
+```bash
+cargo run --release
+```
+
+## Usage
+
+1. **Load Genome**: Click "Open FASTA..." and select your genome file
+   - Supports: `.fasta`, `.fa`, `.fna`, `.ffn`, `.faa`, `.frn`
+   - Gzipped: `.fasta.gz`, `.fa.gz`, etc.
+
+2. **Load Annotations** (optional): Click "Open GFF/GTF..." and select your annotation file
+   - Supports: `.gff`, `.gff3`, `.gtf`
+   - Gzipped: `.gff.gz`, `.gff3.gz`, `.gtf.gz`
+
+3. **Navigate**:
+   - Select a chromosome from the left panel
+   - Use the search box to filter chromosomes
+   - Click sort buttons to change chromosome order
+   - Drag to pan, scroll to zoom
+
+4. **Search and Jump**:
+   - **Go to position**: Enter `chr1:100000` in the "Go to:" field and press Enter
+   - **Find features**: Enter a gene name in "Find feature:" and click Search
+   - Browse results and click "Jump" to navigate to any feature
+
+## File Format Support
+
+### FASTA Files
+Standard FASTA format for genome sequences:
+```
+>chr1
+ATCGATCGATCG...
+>chr2
+GCTAGCTAGCTA...
+```
+
+### GFF3/GTF Files
+Standard GFF3 or GTF format for gene annotations:
+```
+chr1    source    gene    1000    5000    .    +    .    ID=gene1;Name=MyGene
+chr1    source    exon    1000    1500    .    +    .    Parent=gene1
+```
+
+## Keyboard Shortcuts
+- **Mouse wheel**: Zoom in/out
+- **Click + drag**: Pan view
+- **Enter** (in position search): Jump to position
+
+## Architecture
+
+### Modules
+- **fasta.rs**: FASTA genome parser with GC content calculation
+- **gff.rs**: GFF3/GTF annotation parser
+- **interval_tree.rs**: Efficient feature range queries
+- **viewport.rs**: View management (pan, zoom, coordinate mapping)
+- **renderer.rs**: Multi-track genome visualization
+
+### Performance Optimizations
+- Binary search for interval queries
+- Viewport-based rendering (only visible features)
+- Adaptive ruler tick intervals
+- Efficient GC content windowing
+
+## WebAssembly Support
+
+The viewer can be compiled to WebAssembly for browser deployment:
+
+```bash
+# Install wasm toolchain
+rustup target add wasm32-unknown-unknown
+
+# Build for web
+cargo build --release --target wasm32-unknown-unknown
+```
+
+## License
+
+[Add your license here]
+
+## Contributing
+
+Contributions welcome! Please feel free to submit issues or pull requests.
