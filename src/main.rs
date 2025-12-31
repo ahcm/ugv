@@ -6,7 +6,6 @@ mod viewport;
 
 use anyhow::Result;
 use eframe::egui;
-use std::path::PathBuf;
 
 fn main() -> Result<()>
 {
@@ -112,18 +111,51 @@ impl eframe::App for GenomeViewer
             ui.horizontal(|ui| {
                 ui.heading("Genome Viewer");
                 ui.separator();
-                ui.label("FASTA:");
-                ui.text_edit_singleline(&mut self.fasta_path);
-                if ui.button("Load FASTA").clicked()
+
+                if ui.button("Open FASTA...").clicked()
                 {
-                    self.load_fasta();
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("FASTA", &["fasta", "fa", "fna", "ffn", "faa", "frn"])
+                        .add_filter("All files", &["*"])
+                        .pick_file()
+                    {
+                        self.fasta_path = path.display().to_string();
+                        self.load_fasta();
+                    }
                 }
-                ui.separator();
-                ui.label("GFF:");
-                ui.text_edit_singleline(&mut self.gff_path);
-                if ui.button("Load GFF").clicked()
+
+                if !self.fasta_path.is_empty()
                 {
-                    self.load_gff();
+                    ui.label(format!("📄 {}",
+                        std::path::Path::new(&self.fasta_path)
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or(&self.fasta_path)
+                    ));
+                }
+
+                ui.separator();
+
+                if ui.button("Open GFF/GTF...").clicked()
+                {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("GFF/GTF", &["gff", "gff3", "gtf"])
+                        .add_filter("All files", &["*"])
+                        .pick_file()
+                    {
+                        self.gff_path = path.display().to_string();
+                        self.load_gff();
+                    }
+                }
+
+                if !self.gff_path.is_empty()
+                {
+                    ui.label(format!("📄 {}",
+                        std::path::Path::new(&self.gff_path)
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or(&self.gff_path)
+                    ));
                 }
             });
         });
