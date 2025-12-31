@@ -91,6 +91,16 @@ struct GenomeViewer
     fasta_file_name: String,
     #[cfg(target_arch = "wasm32")]
     gff_file_name: String,
+    #[cfg(target_arch = "wasm32")]
+    file_picker_open: Option<FilePickerType>,
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Copy, PartialEq)]
+enum FilePickerType
+{
+    Fasta,
+    Gff,
 }
 
 impl GenomeViewer
@@ -120,6 +130,8 @@ impl GenomeViewer
             fasta_file_name: String::new(),
             #[cfg(target_arch = "wasm32")]
             gff_file_name: String::new(),
+            #[cfg(target_arch = "wasm32")]
+            file_picker_open: None,
         }
     }
 
@@ -505,6 +517,131 @@ impl GenomeViewer
     }
 
     #[cfg(target_arch = "wasm32")]
+    fn open_file_picker(&mut self, picker_type: FilePickerType)
+    {
+        use wasm_bindgen::JsCast;
+        use wasm_bindgen::closure::Closure;
+
+        let window = web_sys::window().expect("no global window");
+        let document = window.document().expect("no document");
+
+        // Create file input element
+        let input = document
+            .create_element("input")
+            .expect("failed to create input")
+            .dyn_into::<web_sys::HtmlInputElement>()
+            .expect("not an input element");
+
+        input.set_type("file");
+
+        // Set accept attribute based on file type
+        match picker_type
+        {
+            FilePickerType::Fasta =>
+            {
+                input.set_accept(".fasta,.fa,.fna,.ffn,.faa,.frn,.fasta.gz,.fa.gz,.fna.gz,.ffn.gz,.faa.gz,.frn.gz,.gz");
+            }
+            FilePickerType::Gff =>
+            {
+                input.set_accept(".gff,.gff3,.gtf,.gff.gz,.gff3.gz,.gtf.gz,.gz");
+            }
+        }
+
+        // Store the picker type so we know what to do with the selected file
+        self.file_picker_open = Some(picker_type);
+
+        // Create a change event handler
+        let input_clone = input.clone();
+        let closure = Closure::wrap(Box::new(move |_event: web_sys::Event| {
+            if let Some(files) = input_clone.files()
+            {
+                if files.length() > 0
+                {
+                    if let Some(file) = files.get(0)
+                    {
+                        // File selected - we'll handle this in the update loop
+                        // by checking input.files()
+                        log::info!("File selected: {}", file.name());
+                    }
+                }
+            }
+        }) as Box<dyn FnMut(_)>);
+
+        input.set_onchange(Some(closure.as_ref().unchecked_ref()));
+        closure.forget(); // Keep the closure alive
+
+        // Trigger the file picker
+        input.click();
+
+        // Store the input element in the DOM so we can check it later
+        // We'll attach it to the body but make it hidden
+        input.style().set_property("display", "none").ok();
+        input.set_id(&format!("file_picker_{}", match picker_type {
+            FilePickerType::Fasta => "fasta",
+            FilePickerType::Gff => "gff",
+        }));
+
+        document.body()
+            .expect("no body")
+            .append_child(&input)
+            .expect("failed to append input");
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn check_file_picker(&mut self)
+    {
+        use wasm_bindgen::JsCast;
+
+        if let Some(picker_type) = self.file_picker_open
+        {
+            let window = web_sys::window().expect("no global window");
+            let document = window.document().expect("no document");
+
+            let element_id = format!("file_picker_{}", match picker_type {
+                FilePickerType::Fasta => "fasta",
+                FilePickerType::Gff => "gff",
+            });
+
+            if let Some(element) = document.get_element_by_id(&element_id)
+            {
+                let element_clone = element.clone();
+                if let Ok(input) = element_clone.dyn_into::<web_sys::HtmlInputElement>()
+                {
+                    if let Some(files) = input.files()
+                    {
+                        if files.length() > 0
+                        {
+                            if let Some(file) = files.get(0)
+                            {
+                                // File was selected, load it
+                                match picker_type
+                                {
+                                    FilePickerType::Fasta =>
+                                    {
+                                        self.load_fasta_from_file(file);
+                                    }
+                                    FilePickerType::Gff =>
+                                    {
+                                        self.load_gff_from_file(file);
+                                    }
+                                }
+
+                                // Remove the input element from DOM
+                                if let Some(parent) = element.parent_element()
+                                {
+                                    parent.remove_child(&element).ok();
+                                }
+
+                                self.file_picker_open = None;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
     fn check_features_promise(&mut self)
     {
         let mut promise_lock = self.features_promise.lock();
@@ -540,6 +677,7 @@ impl eframe::App for GenomeViewer
         // Check for async file loading completion (WASM only)
         #[cfg(target_arch = "wasm32")]
         {
+            self.check_file_picker();
             self.check_genome_promise();
             self.check_features_promise();
 
@@ -626,7 +764,13 @@ impl eframe::App for GenomeViewer
                 #[cfg(target_arch = "wasm32")]
                 {
                     ui.vertical(|ui| {
-                        ui.label("FASTA (drag & drop file or enter URL):");
+                        ui.horizontal(|ui| {
+                            if ui.button("Browse...").clicked()
+                            {
+                                self.open_file_picker(FilePickerType::Fasta);
+                            }
+                            ui.label("or drag & drop file or enter URL");
+                        });
 
                         // Show selected file name
                         if !self.fasta_file_name.is_empty()
@@ -676,7 +820,13 @@ impl eframe::App for GenomeViewer
                 #[cfg(target_arch = "wasm32")]
                 {
                     ui.vertical(|ui| {
-                        ui.label("GFF/GTF (drag & drop file or enter URL):");
+                        ui.horizontal(|ui| {
+                            if ui.button("Browse...").clicked()
+                            {
+                                self.open_file_picker(FilePickerType::Gff);
+                            }
+                            ui.label("or drag & drop file or enter URL");
+                        });
 
                         // Show selected file name
                         if !self.gff_file_name.is_empty()

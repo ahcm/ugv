@@ -33,7 +33,11 @@ rfd = "0.15"  # Native file dialogs only
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["Request", "Response", "Window", "File", "FileList", "FileReader", "Blob"] }
+web-sys = { version = "0.3", features = [
+    "Request", "RequestInit", "RequestMode", "Response", "Window",
+    "File", "FileList", "FileReader", "Blob",
+    "Document", "Element", "HtmlInputElement", "EventTarget", "Event"
+] }
 log = "0.4"
 gloo-net = "0.6"          # HTTP requests
 gloo-file = "0.3"         # File reading
@@ -125,6 +129,13 @@ wasm_bindgen_futures::spawn_local(async {
 
 The WASM build supports multiple file loading methods:
 
+#### File Dialog (Browser Native)
+- "Browse..." button opens the browser's native file picker
+- Uses HTML5 File API via web-sys bindings
+- File type filtering (.fasta, .gff, .gz extensions)
+- Automatic file type detection and loading
+- Most user-friendly method for local files
+
 #### Drag and Drop
 - Users can drag local files directly onto the browser window
 - Files are read using the browser's File API
@@ -169,11 +180,12 @@ If loading genome files from external sources, ensure:
 
 WASM-specific features already implemented:
 
-1. ✅ **Drag & Drop**: Drag genome files onto the browser window
-2. ✅ **File API**: Uses browser File API for local file access
-3. ✅ **HTTP Loading**: Load files from URLs (Ensembl, NCBI, etc.)
-4. ✅ **Gzip Support**: Automatic decompression of `.gz` files
-5. ✅ **Visual Feedback**: Overlay when hovering with files
+1. ✅ **File Dialog**: Native browser file picker with "Browse..." button
+2. ✅ **Drag & Drop**: Drag genome files onto the browser window
+3. ✅ **File API**: Uses browser File API for local file access
+4. ✅ **HTTP Loading**: Load files from URLs (Ensembl, NCBI, etc.)
+5. ✅ **Gzip Support**: Automatic decompression of `.gz` files
+6. ✅ **Visual Feedback**: Overlay when hovering with files
 
 ## Future Enhancements
 

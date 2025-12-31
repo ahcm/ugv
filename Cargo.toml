@@ -21,7 +21,7 @@ rfd = "0.15"
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["Request", "RequestInit", "RequestMode", "Response", "Window", "File", "FileList", "FileReader", "Blob"] }
+web-sys = { version = "0.3", features = ["Request", "RequestInit", "RequestMode", "Response", "Window", "File", "FileList", "FileReader", "Blob", "Document", "Element", "HtmlInputElement", "EventTarget", "Event"] }
 log = "0.4"
 gloo-net = "0.6"
 gloo-file = { version = "0.3", features = ["futures"] }
