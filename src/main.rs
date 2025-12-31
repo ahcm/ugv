@@ -93,6 +93,7 @@ struct GenomeViewer
     gff_file_name: String,
     #[cfg(target_arch = "wasm32")]
     file_picker_open: Option<FilePickerType>,
+    loading_progress: Option<LoadingProgress>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -101,6 +102,38 @@ enum FilePickerType
 {
     Fasta,
     Gff,
+}
+
+#[derive(Clone)]
+struct LoadingProgress
+{
+    description: String,
+    bytes_loaded: usize,
+    total_bytes: Option<usize>,
+}
+
+fn format_bytes(bytes: usize) -> String
+{
+    const KB: usize = 1024;
+    const MB: usize = KB * 1024;
+    const GB: usize = MB * 1024;
+
+    if bytes >= GB
+    {
+        format!("{:.2} GB", bytes as f64 / GB as f64)
+    }
+    else if bytes >= MB
+    {
+        format!("{:.2} MB", bytes as f64 / MB as f64)
+    }
+    else if bytes >= KB
+    {
+        format!("{:.2} KB", bytes as f64 / KB as f64)
+    }
+    else
+    {
+        format!("{} B", bytes)
+    }
 }
 
 impl GenomeViewer
@@ -132,6 +165,7 @@ impl GenomeViewer
             gff_file_name: String::new(),
             #[cfg(target_arch = "wasm32")]
             file_picker_open: None,
+            loading_progress: None,
         }
     }
 
@@ -383,6 +417,11 @@ impl GenomeViewer
 
         let path = self.fasta_path.clone();
         self.status_message = format!("Loading FASTA from {}...", path);
+        self.loading_progress = Some(LoadingProgress {
+            description: "Downloading FASTA file...".to_string(),
+            bytes_loaded: 0,
+            total_bytes: None,
+        });
 
         let promise = poll_promise::Promise::spawn_local(async move {
             let data = file_loader::load_file_async(&path).await?;
@@ -397,8 +436,14 @@ impl GenomeViewer
     fn load_fasta_from_file(&mut self, file: web_sys::File)
     {
         let file_name = file.name();
+        let file_size = file.size() as usize;
         self.fasta_file_name = file_name.clone();
         self.status_message = format!("Loading FASTA from {}...", file_name);
+        self.loading_progress = Some(LoadingProgress {
+            description: "Reading FASTA file...".to_string(),
+            bytes_loaded: 0,
+            total_bytes: Some(file_size),
+        });
 
         let is_gzipped = file_name.ends_with(".gz");
 
@@ -423,6 +468,7 @@ impl GenomeViewer
         {
             if let Some(result) = promise.ready()
             {
+                self.loading_progress = None;
                 match result
                 {
                     Ok(genome) =>
@@ -444,6 +490,15 @@ impl GenomeViewer
                     }
                 }
                 *promise_lock = None;
+            }
+            else
+            {
+                // Still loading - update progress description
+                if let Some(ref mut progress) = self.loading_progress
+                {
+                    // Update description based on how long we've been loading
+                    progress.description = "Parsing FASTA...".to_string();
+                }
             }
         }
     }
@@ -484,6 +539,11 @@ impl GenomeViewer
 
         let path = self.gff_path.clone();
         self.status_message = format!("Loading GFF from {}...", path);
+        self.loading_progress = Some(LoadingProgress {
+            description: "Downloading GFF file...".to_string(),
+            bytes_loaded: 0,
+            total_bytes: None,
+        });
 
         let promise = poll_promise::Promise::spawn_local(async move {
             let data = file_loader::load_file_async(&path).await?;
@@ -498,8 +558,14 @@ impl GenomeViewer
     fn load_gff_from_file(&mut self, file: web_sys::File)
     {
         let file_name = file.name();
+        let file_size = file.size() as usize;
         self.gff_file_name = file_name.clone();
         self.status_message = format!("Loading GFF from {}...", file_name);
+        self.loading_progress = Some(LoadingProgress {
+            description: "Reading GFF file...".to_string(),
+            bytes_loaded: 0,
+            total_bytes: Some(file_size),
+        });
 
         let is_gzipped = file_name.ends_with(".gz");
 
@@ -649,6 +715,7 @@ impl GenomeViewer
         {
             if let Some(result) = promise.ready()
             {
+                self.loading_progress = None;
                 match result
                 {
                     Ok(features) =>
@@ -665,6 +732,14 @@ impl GenomeViewer
                     }
                 }
                 *promise_lock = None;
+            }
+            else
+            {
+                // Still loading - update progress description
+                if let Some(ref mut progress) = self.loading_progress
+                {
+                    progress.description = "Parsing GFF...".to_string();
+                }
             }
         }
     }
@@ -691,6 +766,7 @@ impl eframe::App for GenomeViewer
                         {
                             // File already loaded as bytes
                             let name = file.name.clone();
+                            let file_size = bytes.len();
                             let is_gzipped = name.ends_with(".gz");
 
                             // Detect file type by extension
@@ -705,6 +781,11 @@ impl eframe::App for GenomeViewer
                                 // Load as FASTA
                                 self.fasta_file_name = name.clone();
                                 self.status_message = format!("Loading FASTA from {}...", name);
+                                self.loading_progress = Some(LoadingProgress {
+                                    description: "Parsing FASTA...".to_string(),
+                                    bytes_loaded: file_size,
+                                    total_bytes: Some(file_size),
+                                });
 
                                 let data = bytes.clone().to_vec();
                                 let promise = poll_promise::Promise::spawn_local(async move {
@@ -717,6 +798,11 @@ impl eframe::App for GenomeViewer
                                 // Load as GFF/GTF
                                 self.gff_file_name = name.clone();
                                 self.status_message = format!("Loading GFF from {}...", name);
+                                self.loading_progress = Some(LoadingProgress {
+                                    description: "Parsing GFF...".to_string(),
+                                    bytes_loaded: file_size,
+                                    total_bytes: Some(file_size),
+                                });
 
                                 let data = bytes.clone().to_vec();
                                 let promise = poll_promise::Promise::spawn_local(async move {
@@ -885,15 +971,50 @@ impl eframe::App for GenomeViewer
         });
 
         egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(&self.status_message);
-                ui.separator();
-                if let Some(ref chr) = self.selected_chromosome
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label(&self.status_message);
+                    ui.separator();
+                    if let Some(ref chr) = self.selected_chromosome
+                    {
+                        ui.label(format!(
+                            "Chromosome: {} | Position: {}-{}",
+                            chr, self.viewport.start, self.viewport.end
+                        ));
+                    }
+                });
+
+                // Show loading progress if active
+                if let Some(ref progress) = self.loading_progress
                 {
-                    ui.label(format!(
-                        "Chromosome: {} | Position: {}-{}",
-                        chr, self.viewport.start, self.viewport.end
-                    ));
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.label(&progress.description);
+                        if let Some(total) = progress.total_bytes
+                        {
+                            if total > 0
+                            {
+                                let progress_fraction = progress.bytes_loaded as f32 / total as f32;
+                                ui.add(
+                                    egui::ProgressBar::new(progress_fraction)
+                                        .show_percentage()
+                                        .text(format!("{} / {}", format_bytes(progress.bytes_loaded), format_bytes(total)))
+                                );
+                            }
+                            else
+                            {
+                                ui.spinner();
+                            }
+                        }
+                        else
+                        {
+                            ui.spinner();
+                            if progress.bytes_loaded > 0
+                            {
+                                ui.label(format!("{} loaded", format_bytes(progress.bytes_loaded)));
+                            }
+                        }
+                    });
                 }
             });
         });

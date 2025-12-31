@@ -207,6 +207,10 @@ The WebAssembly version supports three methods for loading files:
 
 **Loading Progress:**
 - Status bar shows current operation ("Loading FASTA from...")
+- Progress bar displays loading/parsing progress with file size information
+- Visual spinner indicates ongoing operations
+- Shows download progress for HTTP URLs (when content-length is available)
+- Shows file size and parsing status for local files
 - Large files may take time to download and parse
 - Gzipped files are automatically decompressed
 - File name is displayed once loaded

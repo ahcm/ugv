@@ -33,9 +33,10 @@ rfd = "0.15"  # Native file dialogs only
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
+js-sys = "0.3"            # JavaScript interop (Uint8Array, etc.)
 web-sys = { version = "0.3", features = [
     "Request", "RequestInit", "RequestMode", "Response", "Window",
-    "File", "FileList", "FileReader", "Blob",
+    "File", "FileList", "FileReader", "Blob", "Headers",
     "Document", "Element", "HtmlInputElement", "EventTarget", "Event"
 ] }
 log = "0.4"
@@ -154,6 +155,18 @@ The WASM build supports multiple file loading methods:
 - GFF/GTF files: `.gff`, `.gff3`, `.gtf`
 - All formats support gzip compression (`.gz` extension)
 
+#### Loading Progress Tracking
+The WASM version provides visual feedback during file loading:
+
+- **Progress Bar**: Shows percentage complete for local files (file size known)
+- **Spinner**: Animated spinner for HTTP downloads (when content-length unavailable)
+- **Status Messages**: Updates showing current operation:
+  - "Downloading FASTA file..." - Fetching from URL
+  - "Reading FASTA file..." - Loading local file
+  - "Parsing FASTA..." - Processing file contents
+- **File Size Display**: Shows bytes loaded and total file size in human-readable format (KB, MB, GB)
+- **Bottom Panel**: Progress information displayed in the bottom status panel
+
 ## Deployment Options
 
 ### Static Hosting
@@ -186,6 +199,7 @@ WASM-specific features already implemented:
 4. ✅ **HTTP Loading**: Load files from URLs (Ensembl, NCBI, etc.)
 5. ✅ **Gzip Support**: Automatic decompression of `.gz` files
 6. ✅ **Visual Feedback**: Overlay when hovering with files
+7. ✅ **Loading Progress**: Real-time progress bar showing file loading and parsing status
 
 ## Future Enhancements
 
