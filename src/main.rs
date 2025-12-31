@@ -116,6 +116,7 @@ impl eframe::App for GenomeViewer
                 {
                     if let Some(path) = rfd::FileDialog::new()
                         .add_filter("FASTA", &["fasta", "fa", "fna", "ffn", "faa", "frn"])
+                        .add_filter("FASTA (gzipped)", &["fasta.gz", "fa.gz", "fna.gz", "ffn.gz", "faa.gz", "frn.gz", "gz"])
                         .add_filter("All files", &["*"])
                         .pick_file()
                     {
@@ -140,6 +141,7 @@ impl eframe::App for GenomeViewer
                 {
                     if let Some(path) = rfd::FileDialog::new()
                         .add_filter("GFF/GTF", &["gff", "gff3", "gtf"])
+                        .add_filter("GFF/GTF (gzipped)", &["gff.gz", "gff3.gz", "gtf.gz", "gz"])
                         .add_filter("All files", &["*"])
                         .pick_file()
                     {

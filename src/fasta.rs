@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use flate2::read::GzDecoder;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -23,7 +24,15 @@ impl Genome
         let file =
             File::open(path).with_context(|| format!("Failed to open FASTA file: {}", path))?;
 
-        let reader = BufReader::new(file);
+        let reader: Box<dyn BufRead> = if path.ends_with(".gz")
+        {
+            Box::new(BufReader::new(GzDecoder::new(file)))
+        }
+        else
+        {
+            Box::new(BufReader::new(file))
+        };
+
         let mut chromosomes = HashMap::new();
         let mut current_name = String::new();
         let mut current_seq = Vec::new();

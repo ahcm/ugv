@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use flate2::read::GzDecoder;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -60,7 +61,15 @@ pub fn parse_gff(path: &str) -> Result<Vec<Feature>>
 {
     let file = File::open(path).with_context(|| format!("Failed to open GFF file: {}", path))?;
 
-    let reader = BufReader::new(file);
+    let reader: Box<dyn BufRead> = if path.ends_with(".gz")
+    {
+        Box::new(BufReader::new(GzDecoder::new(file)))
+    }
+    else
+    {
+        Box::new(BufReader::new(file))
+    };
+
     let mut features = Vec::new();
 
     for line in reader.lines()
