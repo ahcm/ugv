@@ -128,7 +128,35 @@ chr1    source    exon    1000    1500    .    +    .    Parent=gene1
 
 ## WebAssembly Support
 
-The viewer can be compiled to WebAssembly for browser deployment:
+The viewer can be compiled to WebAssembly for browser deployment.
+
+### Quick Build
+
+Use the provided build script:
+
+```bash
+chmod +x build_wasm.sh
+./build_wasm.sh
+```
+
+This will:
+1. Build the project for wasm32
+2. Install `wasm-bindgen-cli` if needed
+3. Generate JavaScript bindings
+
+### Run Locally
+
+Start a local web server:
+
+```bash
+python3 -m http.server 8080
+```
+
+Then open http://localhost:8080 in your browser.
+
+### Manual Build
+
+If you prefer to build manually:
 
 ```bash
 # Install wasm toolchain
@@ -136,7 +164,23 @@ rustup target add wasm32-unknown-unknown
 
 # Build for web
 cargo build --release --target wasm32-unknown-unknown
+
+# Install wasm-bindgen-cli
+cargo install wasm-bindgen-cli
+
+# Generate bindings
+wasm-bindgen target/wasm32-unknown-unknown/release/ugv.wasm \
+    --out-dir . \
+    --target web \
+    --no-typescript
 ```
+
+### WASM Limitations
+
+Due to browser security restrictions, the WebAssembly version:
+- Uses text input fields instead of native file dialogs
+- Requires files to be accessible via HTTP/HTTPS URLs or data URLs
+- May have different file access patterns than native builds
 
 ## License
 

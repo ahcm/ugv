@@ -1,1 +1,6 @@
 /target
+
+# WebAssembly build artifacts
+ugv.js
+ugv_bg.wasm
+ugv_bg.wasm.d.ts

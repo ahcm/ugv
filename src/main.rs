@@ -7,6 +7,7 @@ mod viewport;
 use anyhow::Result;
 use eframe::egui;
 
+#[cfg(not(target_arch = "wasm32"))]
 fn main() -> Result<()>
 {
     let options = eframe::NativeOptions {
@@ -18,6 +19,39 @@ fn main() -> Result<()>
 
     eframe::run_native("UGV", options, Box::new(|_cc| Ok(Box::new(GenomeViewer::new()))))
         .map_err(|e| anyhow::anyhow!("Failed to run app: {}", e))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn main()
+{
+    use eframe::wasm_bindgen::JsCast as _;
+
+    // Redirect tracing to console.log
+    eframe::WebLogger::init(log::LevelFilter::Debug).ok();
+
+    let web_options = eframe::WebOptions::default();
+
+    wasm_bindgen_futures::spawn_local(async {
+        let document = web_sys::window()
+            .expect("No window")
+            .document()
+            .expect("No document");
+
+        let canvas = document
+            .get_element_by_id("the_canvas_id")
+            .expect("Failed to find the_canvas_id")
+            .dyn_into::<web_sys::HtmlCanvasElement>()
+            .expect("the_canvas_id was not a HtmlCanvasElement");
+
+        eframe::WebRunner::new()
+            .start(
+                canvas,
+                web_options,
+                Box::new(|_cc| Ok(Box::new(GenomeViewer::new()))),
+            )
+            .await
+            .expect("failed to start eframe");
+    });
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -338,52 +372,78 @@ impl eframe::App for GenomeViewer
                 ui.heading("Genome Viewer");
                 ui.separator();
 
-                if ui.button("Open FASTA...").clicked()
+                #[cfg(not(target_arch = "wasm32"))]
                 {
-                    if let Some(path) = rfd::FileDialog::new()
-                        .add_filter("FASTA", &["fasta", "fa", "fna", "ffn", "faa", "frn"])
-                        .add_filter("FASTA (gzipped)", &["fasta.gz", "fa.gz", "fna.gz", "ffn.gz", "faa.gz", "frn.gz", "gz"])
-                        .add_filter("All files", &["*"])
-                        .pick_file()
+                    if ui.button("Open FASTA...").clicked()
                     {
-                        self.fasta_path = path.display().to_string();
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter("FASTA", &["fasta", "fa", "fna", "ffn", "faa", "frn"])
+                            .add_filter("FASTA (gzipped)", &["fasta.gz", "fa.gz", "fna.gz", "ffn.gz", "faa.gz", "frn.gz", "gz"])
+                            .add_filter("All files", &["*"])
+                            .pick_file()
+                        {
+                            self.fasta_path = path.display().to_string();
+                            self.load_fasta();
+                        }
+                    }
+
+                    if !self.fasta_path.is_empty()
+                    {
+                        ui.label(format!("📄 {}",
+                            std::path::Path::new(&self.fasta_path)
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or(&self.fasta_path)
+                        ));
+                    }
+                }
+
+                #[cfg(target_arch = "wasm32")]
+                {
+                    ui.label("FASTA:");
+                    ui.text_edit_singleline(&mut self.fasta_path);
+                    if ui.button("Load").clicked()
+                    {
                         self.load_fasta();
                     }
                 }
 
-                if !self.fasta_path.is_empty()
-                {
-                    ui.label(format!("📄 {}",
-                        std::path::Path::new(&self.fasta_path)
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or(&self.fasta_path)
-                    ));
-                }
-
                 ui.separator();
 
-                if ui.button("Open GFF/GTF...").clicked()
+                #[cfg(not(target_arch = "wasm32"))]
                 {
-                    if let Some(path) = rfd::FileDialog::new()
-                        .add_filter("GFF/GTF", &["gff", "gff3", "gtf"])
-                        .add_filter("GFF/GTF (gzipped)", &["gff.gz", "gff3.gz", "gtf.gz", "gz"])
-                        .add_filter("All files", &["*"])
-                        .pick_file()
+                    if ui.button("Open GFF/GTF...").clicked()
                     {
-                        self.gff_path = path.display().to_string();
-                        self.load_gff();
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter("GFF/GTF", &["gff", "gff3", "gtf"])
+                            .add_filter("GFF/GTF (gzipped)", &["gff.gz", "gff3.gz", "gtf.gz", "gz"])
+                            .add_filter("All files", &["*"])
+                            .pick_file()
+                        {
+                            self.gff_path = path.display().to_string();
+                            self.load_gff();
+                        }
+                    }
+
+                    if !self.gff_path.is_empty()
+                    {
+                        ui.label(format!("📄 {}",
+                            std::path::Path::new(&self.gff_path)
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or(&self.gff_path)
+                        ));
                     }
                 }
 
-                if !self.gff_path.is_empty()
+                #[cfg(target_arch = "wasm32")]
                 {
-                    ui.label(format!("📄 {}",
-                        std::path::Path::new(&self.gff_path)
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or(&self.gff_path)
-                    ));
+                    ui.label("GFF/GTF:");
+                    ui.text_edit_singleline(&mut self.gff_path);
+                    if ui.button("Load").clicked()
+                    {
+                        self.load_gff();
+                    }
                 }
             });
         });
