@@ -20,6 +20,14 @@ fn main() -> Result<()>
         .map_err(|e| anyhow::anyhow!("Failed to run app: {}", e))
 }
 
+#[derive(PartialEq, Clone, Copy)]
+enum ChromosomeSort
+{
+    Natural,
+    Alphabetical,
+    Size,
+}
+
 struct GenomeViewer
 {
     genome: Option<fasta::Genome>,
@@ -30,6 +38,8 @@ struct GenomeViewer
     gff_path: String,
     selected_chromosome: Option<String>,
     status_message: String,
+    chromosome_search: String,
+    chromosome_sort: ChromosomeSort,
 }
 
 impl GenomeViewer
@@ -45,6 +55,95 @@ impl GenomeViewer
             gff_path: String::new(),
             selected_chromosome: None,
             status_message: "Load a FASTA file to begin".to_string(),
+            chromosome_search: String::new(),
+            chromosome_sort: ChromosomeSort::Natural,
+        }
+    }
+
+    fn extract_chromosome_number(name: &str) -> Option<u32>
+    {
+        // Try to extract numeric part from chromosome names like "chr1", "1", "chromosome1"
+        let s = name.to_lowercase();
+        let s = s.strip_prefix("chr").unwrap_or(&s);
+        let s = s.strip_prefix("chromosome").unwrap_or(s);
+
+        // Extract leading digits
+        let digits: String = s.chars().take_while(|c| c.is_ascii_digit()).collect();
+        digits.parse().ok()
+    }
+
+    fn chromosome_natural_sort_key(name: &str) -> (u8, u32, String)
+    {
+        // Sort order: autosomes (1-22), sex chromosomes (X, Y), mitochondrial (M, MT), others
+        let lower = name.to_lowercase();
+
+        if let Some(num) = Self::extract_chromosome_number(name)
+        {
+            // Numeric chromosomes come first
+            (0, num, String::new())
+        }
+        else if lower.contains("x") || lower == "chrx"
+        {
+            (1, 0, String::from("x"))
+        }
+        else if lower.contains("y") || lower == "chry"
+        {
+            (1, 1, String::from("y"))
+        }
+        else if lower.contains("m") || lower == "chrm" || lower == "mt" || lower == "chrmt"
+        {
+            (1, 2, String::from("m"))
+        }
+        else
+        {
+            // Everything else sorted alphabetically at the end
+            (2, 0, name.to_lowercase())
+        }
+    }
+
+    fn get_sorted_chromosomes(&self) -> Vec<(String, usize)>
+    {
+        if let Some(ref genome) = self.genome
+        {
+            let mut chromosomes: Vec<_> = genome
+                .chromosomes
+                .iter()
+                .map(|(name, chr)| (name.clone(), chr.length))
+                .collect();
+
+            // Apply search filter
+            if !self.chromosome_search.is_empty()
+            {
+                let search_lower = self.chromosome_search.to_lowercase();
+                chromosomes.retain(|(name, _)| name.to_lowercase().contains(&search_lower));
+            }
+
+            // Apply sort
+            match self.chromosome_sort
+            {
+                ChromosomeSort::Natural =>
+                {
+                    chromosomes.sort_by(|a, b| {
+                        let key_a = Self::chromosome_natural_sort_key(&a.0);
+                        let key_b = Self::chromosome_natural_sort_key(&b.0);
+                        key_a.cmp(&key_b)
+                    });
+                }
+                ChromosomeSort::Alphabetical =>
+                {
+                    chromosomes.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+                }
+                ChromosomeSort::Size =>
+                {
+                    chromosomes.sort_by(|a, b| b.1.cmp(&a.1));
+                }
+            }
+
+            chromosomes
+        }
+        else
+        {
+            Vec::new()
         }
     }
 
@@ -177,29 +276,87 @@ impl eframe::App for GenomeViewer
         });
 
         egui::SidePanel::left("side_panel")
-            .min_width(200.0)
+            .min_width(250.0)
             .show(ctx, |ui| {
                 ui.heading("Chromosomes");
                 ui.separator();
 
-                if let Some(ref genome) = self.genome
+                if self.genome.is_some()
                 {
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        for (chr_name, chr_data) in &genome.chromosomes
+                    // Search box
+                    ui.horizontal(|ui| {
+                        ui.label("🔍");
+                        ui.text_edit_singleline(&mut self.chromosome_search);
+                        if ui.button("✖").clicked()
                         {
-                            let is_selected = self.selected_chromosome.as_ref() == Some(chr_name);
-                            if ui
-                                .selectable_label(
-                                    is_selected,
-                                    format!("{} ({} bp)", chr_name, chr_data.length),
-                                )
-                                .clicked()
-                            {
-                                self.selected_chromosome = Some(chr_name.clone());
-                                self.viewport = viewport::Viewport::new(0, chr_data.length);
-                            }
+                            self.chromosome_search.clear();
                         }
                     });
+
+                    ui.separator();
+
+                    // Sort options
+                    ui.horizontal(|ui| {
+                        ui.label("Sort:");
+                        if ui
+                            .selectable_label(
+                                self.chromosome_sort == ChromosomeSort::Natural,
+                                "Natural",
+                            )
+                            .clicked()
+                        {
+                            self.chromosome_sort = ChromosomeSort::Natural;
+                        }
+                        if ui
+                            .selectable_label(
+                                self.chromosome_sort == ChromosomeSort::Alphabetical,
+                                "A-Z",
+                            )
+                            .clicked()
+                        {
+                            self.chromosome_sort = ChromosomeSort::Alphabetical;
+                        }
+                        if ui
+                            .selectable_label(
+                                self.chromosome_sort == ChromosomeSort::Size,
+                                "Size",
+                            )
+                            .clicked()
+                        {
+                            self.chromosome_sort = ChromosomeSort::Size;
+                        }
+                    });
+
+                    ui.separator();
+
+                    // Chromosome list
+                    let chromosomes = self.get_sorted_chromosomes();
+
+                    if chromosomes.is_empty()
+                    {
+                        ui.label("No chromosomes found");
+                    }
+                    else
+                    {
+                        ui.label(format!("{} chromosome(s)", chromosomes.len()));
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            for (chr_name, chr_length) in chromosomes
+                            {
+                                let is_selected =
+                                    self.selected_chromosome.as_ref() == Some(&chr_name);
+                                if ui
+                                    .selectable_label(
+                                        is_selected,
+                                        format!("{} ({} bp)", chr_name, chr_length),
+                                    )
+                                    .clicked()
+                                {
+                                    self.selected_chromosome = Some(chr_name.clone());
+                                    self.viewport = viewport::Viewport::new(0, chr_length);
+                                }
+                            }
+                        });
+                    }
                 }
                 else
                 {
