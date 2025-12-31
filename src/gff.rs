@@ -1,8 +1,7 @@
 use anyhow::{Context, Result};
 use flate2::read::GzDecoder;
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Cursor};
 
 #[derive(Debug, Clone)]
 pub enum Strand
@@ -57,8 +56,32 @@ impl Feature
     }
 }
 
+pub fn parse_gff_bytes(data: Vec<u8>, is_gzipped: bool) -> Result<Vec<Feature>>
+{
+    let reader: Box<dyn BufRead> = if is_gzipped
+    {
+        Box::new(BufReader::new(GzDecoder::new(Cursor::new(data))))
+    }
+    else
+    {
+        Box::new(BufReader::new(Cursor::new(data)))
+    };
+
+    parse_gff_reader(reader)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn parse_gff(path: &str) -> Result<Vec<Feature>>
 {
+    use std::fs::File;
+
+    if path.starts_with("http://") || path.starts_with("https://")
+    {
+        return Err(anyhow::anyhow!(
+            "HTTP URLs not supported in native build. Please download the file first."
+        ));
+    }
+
     let file = File::open(path).with_context(|| format!("Failed to open GFF file: {}", path))?;
 
     let reader: Box<dyn BufRead> = if path.ends_with(".gz")
@@ -70,6 +93,11 @@ pub fn parse_gff(path: &str) -> Result<Vec<Feature>>
         Box::new(BufReader::new(file))
     };
 
+    parse_gff_reader(reader)
+}
+
+fn parse_gff_reader(reader: Box<dyn BufRead>) -> Result<Vec<Feature>>
+{
     let mut features = Vec::new();
 
     for line in reader.lines()

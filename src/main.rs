@@ -3,6 +3,7 @@ mod gff;
 mod interval_tree;
 mod renderer;
 mod viewport;
+mod file_loader;
 
 use anyhow::Result;
 use eframe::egui;
@@ -62,6 +63,10 @@ enum ChromosomeSort
     Size,
 }
 
+type GenomePromise = egui::mutex::Mutex<Option<poll_promise::Promise<Result<fasta::Genome>>>>;
+type FeaturesPromise =
+    egui::mutex::Mutex<Option<poll_promise::Promise<Result<Vec<gff::Feature>>>>>;
+
 struct GenomeViewer
 {
     genome: Option<fasta::Genome>,
@@ -78,6 +83,10 @@ struct GenomeViewer
     feature_search: String,
     search_results: Vec<(String, String, usize, usize)>, // (chr, name, start, end)
     show_search_results: bool,
+    #[cfg(target_arch = "wasm32")]
+    genome_promise: GenomePromise,
+    #[cfg(target_arch = "wasm32")]
+    features_promise: FeaturesPromise,
 }
 
 impl GenomeViewer
@@ -99,6 +108,10 @@ impl GenomeViewer
             feature_search: String::new(),
             search_results: Vec::new(),
             show_search_results: false,
+            #[cfg(target_arch = "wasm32")]
+            genome_promise: egui::mutex::Mutex::new(None),
+            #[cfg(target_arch = "wasm32")]
+            features_promise: egui::mutex::Mutex::new(None),
         }
     }
 
@@ -308,6 +321,7 @@ impl GenomeViewer
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn load_fasta(&mut self)
     {
         if self.fasta_path.is_empty()
@@ -338,6 +352,61 @@ impl GenomeViewer
         }
     }
 
+    #[cfg(target_arch = "wasm32")]
+    fn load_fasta(&mut self)
+    {
+        if self.fasta_path.is_empty()
+        {
+            self.status_message = "Error: No FASTA path specified".to_string();
+            return;
+        }
+
+        let path = self.fasta_path.clone();
+        self.status_message = format!("Loading FASTA from {}...", path);
+
+        let promise = poll_promise::Promise::spawn_local(async move {
+            let data = file_loader::load_file_async(&path).await?;
+            let is_gzipped = path.ends_with(".gz");
+            fasta::Genome::from_bytes(data, is_gzipped)
+        });
+
+        *self.genome_promise.lock() = Some(promise);
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn check_genome_promise(&mut self)
+    {
+        let mut promise_lock = self.genome_promise.lock();
+        if let Some(promise) = promise_lock.as_mut()
+        {
+            if let Some(result) = promise.ready()
+            {
+                match result
+                {
+                    Ok(genome) =>
+                    {
+                        self.status_message = format!("Loaded {} chromosomes", genome.chromosomes.len());
+                        if let Some(first_chr) = genome.chromosomes.keys().next()
+                        {
+                            self.selected_chromosome = Some(first_chr.clone());
+                            if let Some(chr) = genome.chromosomes.get(first_chr)
+                            {
+                                self.viewport = viewport::Viewport::new(0, chr.length);
+                            }
+                        }
+                        self.genome = Some(genome.clone());
+                    }
+                    Err(e) =>
+                    {
+                        self.status_message = format!("Error loading FASTA: {}", e);
+                    }
+                }
+                *promise_lock = None;
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     fn load_gff(&mut self)
     {
         if self.gff_path.is_empty()
@@ -361,12 +430,68 @@ impl GenomeViewer
             }
         }
     }
+
+    #[cfg(target_arch = "wasm32")]
+    fn load_gff(&mut self)
+    {
+        if self.gff_path.is_empty()
+        {
+            self.status_message = "Error: No GFF path specified".to_string();
+            return;
+        }
+
+        let path = self.gff_path.clone();
+        self.status_message = format!("Loading GFF from {}...", path);
+
+        let promise = poll_promise::Promise::spawn_local(async move {
+            let data = file_loader::load_file_async(&path).await?;
+            let is_gzipped = path.ends_with(".gz");
+            gff::parse_gff_bytes(data, is_gzipped)
+        });
+
+        *self.features_promise.lock() = Some(promise);
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn check_features_promise(&mut self)
+    {
+        let mut promise_lock = self.features_promise.lock();
+        if let Some(promise) = promise_lock.as_mut()
+        {
+            if let Some(result) = promise.ready()
+            {
+                match result
+                {
+                    Ok(features) =>
+                    {
+                        let count = features.len();
+                        self.interval_tree =
+                            Some(interval_tree::IntervalTree::from_features(&features));
+                        self.features = features.clone();
+                        self.status_message = format!("Loaded {} features", count);
+                    }
+                    Err(e) =>
+                    {
+                        self.status_message = format!("Error loading GFF: {}", e);
+                    }
+                }
+                *promise_lock = None;
+            }
+        }
+    }
 }
 
 impl eframe::App for GenomeViewer
 {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame)
     {
+        // Check for async file loading completion (WASM only)
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.check_genome_promise();
+            self.check_features_promise();
+        }
+
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.heading("Genome Viewer");

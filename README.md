@@ -179,8 +179,19 @@ wasm-bindgen target/wasm32-unknown-unknown/release/ugv.wasm \
 
 Due to browser security restrictions, the WebAssembly version:
 - Uses text input fields instead of native file dialogs
-- Requires files to be accessible via HTTP/HTTPS URLs or data URLs
-- May have different file access patterns than native builds
+- Requires files to be accessible via HTTP/HTTPS URLs
+- Automatically fetches and loads files from provided URLs
+- Supports gzipped files (`.gz`) with automatic decompression
+
+### Using the WASM Version
+
+1. Enter the full HTTP/HTTPS URL to your genome file
+   - Example: `https://ftp.ensembl.org/pub/release-115/fasta/bos_taurus/dna_index/Bos_taurus.ARS-UCD2.0.dna.toplevel.fa.gz`
+2. Click "Load" and wait for the file to download and parse
+3. The status bar will show loading progress
+4. Once loaded, you can navigate the genome normally
+
+**Note**: Large genome files may take time to download and parse. The viewer will show a "Loading..." message during this process.
 
 ## License
 

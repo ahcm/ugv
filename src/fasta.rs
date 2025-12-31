@@ -1,8 +1,7 @@
 use anyhow::{Context, Result};
 use flate2::read::GzDecoder;
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Cursor};
 
 #[derive(Debug, Clone)]
 pub struct Chromosome
@@ -12,6 +11,7 @@ pub struct Chromosome
     pub sequence: Vec<u8>,
 }
 
+#[derive(Clone)]
 pub struct Genome
 {
     pub chromosomes: HashMap<String, Chromosome>,
@@ -19,8 +19,32 @@ pub struct Genome
 
 impl Genome
 {
+    pub fn from_bytes(data: Vec<u8>, is_gzipped: bool) -> Result<Self>
+    {
+        let reader: Box<dyn BufRead> = if is_gzipped
+        {
+            Box::new(BufReader::new(GzDecoder::new(Cursor::new(data))))
+        }
+        else
+        {
+            Box::new(BufReader::new(Cursor::new(data)))
+        };
+
+        Self::parse_fasta(reader)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn from_file(path: &str) -> Result<Self>
     {
+        use std::fs::File;
+
+        if path.starts_with("http://") || path.starts_with("https://")
+        {
+            return Err(anyhow::anyhow!(
+                "HTTP URLs not supported in native build. Please download the file first."
+            ));
+        }
+
         let file =
             File::open(path).with_context(|| format!("Failed to open FASTA file: {}", path))?;
 
@@ -33,6 +57,11 @@ impl Genome
             Box::new(BufReader::new(file))
         };
 
+        Self::parse_fasta(reader)
+    }
+
+    fn parse_fasta(reader: Box<dyn BufRead>) -> Result<Self>
+    {
         let mut chromosomes = HashMap::new();
         let mut current_name = String::new();
         let mut current_seq = Vec::new();
