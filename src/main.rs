@@ -40,6 +40,10 @@ struct GenomeViewer
     status_message: String,
     chromosome_search: String,
     chromosome_sort: ChromosomeSort,
+    position_search: String,
+    feature_search: String,
+    search_results: Vec<(String, String, usize, usize)>, // (chr, name, start, end)
+    show_search_results: bool,
 }
 
 impl GenomeViewer
@@ -57,6 +61,10 @@ impl GenomeViewer
             status_message: "Load a FASTA file to begin".to_string(),
             chromosome_search: String::new(),
             chromosome_sort: ChromosomeSort::Natural,
+            position_search: String::new(),
+            feature_search: String::new(),
+            search_results: Vec::new(),
+            show_search_results: false,
         }
     }
 
@@ -98,6 +106,125 @@ impl GenomeViewer
         {
             // Everything else sorted alphabetically at the end
             (2, 0, name.to_lowercase())
+        }
+    }
+
+    fn parse_position_search(&self, query: &str) -> Option<(String, usize)>
+    {
+        let query = query.trim();
+
+        // Format: "chr1:100000" or "chr1:100,000" or just "100000"
+        if let Some((chr, pos)) = query.split_once(':')
+        {
+            // Has chromosome specified
+            let pos_str = pos.replace(&[',', '_'][..], "");
+            if let Ok(position) = pos_str.parse::<usize>()
+            {
+                return Some((chr.to_string(), position));
+            }
+        }
+        else
+        {
+            // Just a number, use current chromosome
+            let pos_str = query.replace(&[',', '_'][..], "");
+            if let Ok(position) = pos_str.parse::<usize>()
+            {
+                if let Some(ref chr) = self.selected_chromosome
+                {
+                    return Some((chr.clone(), position));
+                }
+            }
+        }
+
+        None
+    }
+
+    fn search_position(&mut self)
+    {
+        if let Some((chr, position)) = self.parse_position_search(&self.position_search)
+        {
+            // Check if chromosome exists
+            if let Some(ref genome) = self.genome
+            {
+                if let Some(chr_data) = genome.chromosomes.get(&chr)
+                {
+                    self.selected_chromosome = Some(chr.clone());
+
+                    // Center the view on the position
+                    let window_size = 10000.min(chr_data.length / 2);
+                    let start = position.saturating_sub(window_size / 2);
+                    let end = (position + window_size / 2).min(chr_data.length);
+
+                    self.viewport = viewport::Viewport::new(0, chr_data.length);
+                    self.viewport.set_region(start, end);
+
+                    self.status_message = format!("Jumped to {}:{}", chr, position);
+                }
+                else
+                {
+                    self.status_message = format!("Chromosome '{}' not found", chr);
+                }
+            }
+        }
+        else
+        {
+            self.status_message = "Invalid position format. Use 'chr1:100000' or '100000'".to_string();
+        }
+    }
+
+    fn search_features(&mut self)
+    {
+        let query = self.feature_search.trim().to_lowercase();
+        if query.is_empty()
+        {
+            return;
+        }
+
+        self.search_results.clear();
+
+        for feature in &self.features
+        {
+            let name = feature.name().to_lowercase();
+            let id = feature.get_attribute("ID").unwrap_or("").to_lowercase();
+            let gene = feature.get_attribute("gene").unwrap_or("").to_lowercase();
+
+            if name.contains(&query) || id.contains(&query) || gene.contains(&query)
+            {
+                self.search_results.push((
+                    feature.seqid.clone(),
+                    feature.name(),
+                    feature.start,
+                    feature.end,
+                ));
+            }
+        }
+
+        if self.search_results.is_empty()
+        {
+            self.status_message = format!("No features found matching '{}'", self.feature_search);
+        }
+        else
+        {
+            self.status_message = format!("Found {} feature(s) matching '{}'", self.search_results.len(), self.feature_search);
+            self.show_search_results = true;
+        }
+    }
+
+    fn jump_to_feature(&mut self, chr: &str, start: usize, end: usize)
+    {
+        if let Some(ref genome) = self.genome
+        {
+            if let Some(chr_data) = genome.chromosomes.get(chr)
+            {
+                self.selected_chromosome = Some(chr.to_string());
+
+                // Zoom to feature with some padding
+                self.viewport = viewport::Viewport::new(0, chr_data.length);
+                self.viewport.zoom_to_feature(start, end, 0.2);
+
+                self.show_search_results = false;
+                self.status_message = format!("Jumped to {}:{}-{}", chr, start, end);
+            }
         }
     }
 
@@ -261,6 +388,43 @@ impl eframe::App for GenomeViewer
             });
         });
 
+        // Search panel (below top panel)
+        egui::TopBottomPanel::top("search_panel").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Go to:");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.position_search)
+                        .hint_text("chr1:100000 or 100000")
+                        .desired_width(150.0),
+                );
+                if ui.button("🔍 Jump").clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter))
+                {
+                    self.search_position();
+                }
+
+                ui.separator();
+
+                ui.label("Find feature:");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.feature_search)
+                        .hint_text("gene name, ID...")
+                        .desired_width(150.0),
+                );
+                if ui.button("🔍 Search").clicked()
+                {
+                    self.search_features();
+                }
+                if !self.search_results.is_empty()
+                {
+                    ui.label(format!("({} results)", self.search_results.len()));
+                    if ui.button("Show Results").clicked()
+                    {
+                        self.show_search_results = !self.show_search_results;
+                    }
+                }
+            });
+        });
+
         egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.label(&self.status_message);
@@ -363,6 +527,57 @@ impl eframe::App for GenomeViewer
                     ui.label("No genome loaded");
                 }
             });
+
+        // Search results window
+        let mut keep_results_open = self.show_search_results;
+        let mut jump_to: Option<(String, usize, usize)> = None;
+        let mut close_clicked = false;
+
+        if self.show_search_results
+        {
+            egui::Window::new("Search Results")
+                .open(&mut keep_results_open)
+                .default_width(400.0)
+                .show(ctx, |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        for (chr, name, start, end) in &self.search_results
+                        {
+                            ui.horizontal(|ui| {
+                                if ui.button("Jump").clicked()
+                                {
+                                    jump_to = Some((chr.clone(), *start, *end));
+                                }
+                                ui.label(format!(
+                                    "{} ({}:{}-{}, {} bp)",
+                                    name,
+                                    chr,
+                                    start,
+                                    end,
+                                    end - start
+                                ));
+                            });
+                        }
+                    });
+
+                    ui.separator();
+                    if ui.button("Close").clicked()
+                    {
+                        close_clicked = true;
+                    }
+                });
+        }
+
+        if close_clicked
+        {
+            keep_results_open = false;
+        }
+
+        self.show_search_results = keep_results_open;
+
+        if let Some((chr, start, end)) = jump_to
+        {
+            self.jump_to_feature(&chr, start, end);
+        }
 
         egui::CentralPanel::default().show(ctx, |ui| {
             let available_size = ui.available_size();
