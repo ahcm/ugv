@@ -2,27 +2,33 @@ use crate::gff::Feature;
 use std::collections::HashMap;
 
 #[derive(Debug)]
-pub struct IntervalTree {
+pub struct IntervalTree
+{
     trees: HashMap<String, ChromosomeTree>,
 }
 
 #[derive(Debug)]
-struct ChromosomeTree {
+struct ChromosomeTree
+{
     intervals: Vec<Interval>,
 }
 
 #[derive(Debug, Clone)]
-struct Interval {
+struct Interval
+{
     start: usize,
     end: usize,
     feature_idx: usize,
 }
 
-impl IntervalTree {
-    pub fn from_features(features: &[Feature]) -> Self {
+impl IntervalTree
+{
+    pub fn from_features(features: &[Feature]) -> Self
+    {
         let mut trees: HashMap<String, Vec<Interval>> = HashMap::new();
 
-        for (idx, feature) in features.iter().enumerate() {
+        for (idx, feature) in features.iter().enumerate()
+        {
             trees
                 .entry(feature.seqid.clone())
                 .or_default()
@@ -37,46 +43,62 @@ impl IntervalTree {
             trees: HashMap::new(),
         };
 
-        for (chr, mut intervals) in trees {
+        for (chr, mut intervals) in trees
+        {
             intervals.sort_by_key(|i| i.start);
-            interval_tree.trees.insert(chr, ChromosomeTree { intervals });
+            interval_tree
+                .trees
+                .insert(chr, ChromosomeTree { intervals });
         }
 
         interval_tree
     }
 
-    pub fn query(&self, chr: &str, start: usize, end: usize) -> Vec<usize> {
-        if let Some(tree) = self.trees.get(chr) {
+    pub fn query(&self, chr: &str, start: usize, end: usize) -> Vec<usize>
+    {
+        if let Some(tree) = self.trees.get(chr)
+        {
             tree.query(start, end)
-        } else {
+        }
+        else
+        {
             Vec::new()
         }
     }
 }
 
-impl ChromosomeTree {
-    fn query(&self, start: usize, end: usize) -> Vec<usize> {
+impl ChromosomeTree
+{
+    fn query(&self, start: usize, end: usize) -> Vec<usize>
+    {
         let mut result = Vec::new();
 
         // Binary search to find the first potentially overlapping interval
         let mut left = 0;
         let mut right = self.intervals.len();
 
-        while left < right {
+        while left < right
+        {
             let mid = (left + right) / 2;
-            if self.intervals[mid].end <= start {
+            if self.intervals[mid].end <= start
+            {
                 left = mid + 1;
-            } else {
+            }
+            else
+            {
                 right = mid;
             }
         }
 
         // Collect all overlapping intervals from this point
-        for interval in &self.intervals[left..] {
-            if interval.start >= end {
+        for interval in &self.intervals[left..]
+        {
+            if interval.start >= end
+            {
                 break;
             }
-            if interval.end > start {
+            if interval.end > start
+            {
                 result.push(interval.feature_idx);
             }
         }
@@ -86,15 +108,29 @@ impl ChromosomeTree {
 }
 
 #[cfg(test)]
-mod tests {
+mod tests
+{
     use super::*;
 
     #[test]
-    fn test_interval_query() {
+    fn test_interval_query()
+    {
         let intervals = vec![
-            Interval { start: 100, end: 200, feature_idx: 0 },
-            Interval { start: 150, end: 250, feature_idx: 1 },
-            Interval { start: 300, end: 400, feature_idx: 2 },
+            Interval {
+                start: 100,
+                end: 200,
+                feature_idx: 0,
+            },
+            Interval {
+                start: 150,
+                end: 250,
+                feature_idx: 1,
+            },
+            Interval {
+                start: 300,
+                end: 400,
+                feature_idx: 2,
+            },
         ];
 
         let tree = ChromosomeTree { intervals };

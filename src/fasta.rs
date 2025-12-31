@@ -5,37 +5,45 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 
 #[derive(Debug, Clone)]
-pub struct Chromosome {
+pub struct Chromosome
+{
     pub name: String,
     pub length: usize,
     pub sequence: Vec<u8>,
 }
 
-pub struct Genome {
+pub struct Genome
+{
     pub chromosomes: HashMap<String, Chromosome>,
 }
 
-impl Genome {
-    pub fn from_file(path: &str) -> Result<Self> {
-        let file = File::open(path)
-            .with_context(|| format!("Failed to open FASTA file: {}", path))?;
+impl Genome
+{
+    pub fn from_file(path: &str) -> Result<Self>
+    {
+        let file =
+            File::open(path).with_context(|| format!("Failed to open FASTA file: {}", path))?;
 
         let reader = BufReader::new(file);
         let mut chromosomes = HashMap::new();
         let mut current_name = String::new();
         let mut current_seq = Vec::new();
 
-        for line in reader.lines() {
+        for line in reader.lines()
+        {
             let line = line?;
             let line = line.trim();
 
-            if line.is_empty() {
+            if line.is_empty()
+            {
                 continue;
             }
 
-            if line.starts_with('>') {
+            if line.starts_with('>')
+            {
                 // Save previous chromosome
-                if !current_name.is_empty() {
+                if !current_name.is_empty()
+                {
                     let chr = Chromosome {
                         name: current_name.clone(),
                         length: current_seq.len(),
@@ -51,14 +59,17 @@ impl Genome {
                     .unwrap_or("")
                     .to_string();
                 current_seq = Vec::new();
-            } else {
+            }
+            else
+            {
                 // Add sequence data (convert to uppercase for consistency)
                 current_seq.extend(line.bytes().map(|b| b.to_ascii_uppercase()));
             }
         }
 
         // Save last chromosome
-        if !current_name.is_empty() {
+        if !current_name.is_empty()
+        {
             let chr = Chromosome {
                 name: current_name.clone(),
                 length: current_seq.len(),
@@ -70,31 +81,34 @@ impl Genome {
         Ok(Genome { chromosomes })
     }
 
-    pub fn get_sequence(&self, chr: &str, start: usize, end: usize) -> Option<&[u8]> {
+    pub fn get_sequence(&self, chr: &str, start: usize, end: usize) -> Option<&[u8]>
+    {
         self.chromosomes
             .get(chr)
             .and_then(|c| c.sequence.get(start..end))
     }
 }
 
-impl Chromosome {
-    pub fn get_gc_content(&self, start: usize, end: usize) -> f32 {
+impl Chromosome
+{
+    pub fn get_gc_content(&self, start: usize, end: usize) -> f32
+    {
         let start = start.min(self.length);
         let end = end.min(self.length);
 
-        if start >= end {
+        if start >= end
+        {
             return 0.0;
         }
 
         let seq = &self.sequence[start..end];
-        let gc_count = seq.iter()
-            .filter(|&&b| b == b'G' || b == b'C')
-            .count();
+        let gc_count = seq.iter().filter(|&&b| b == b'G' || b == b'C').count();
 
         gc_count as f32 / seq.len() as f32
     }
 
-    pub fn get_base_at(&self, pos: usize) -> Option<char> {
+    pub fn get_base_at(&self, pos: usize) -> Option<char>
+    {
         self.sequence.get(pos).map(|&b| b as char)
     }
 }

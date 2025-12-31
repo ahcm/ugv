@@ -18,7 +18,8 @@ pub fn render_genome(
     features: &[Feature],
     interval_tree: Option<&IntervalTree>,
     chr_name: &str,
-) {
+)
+{
     let mut y_offset = rect.top();
 
     // Draw ruler
@@ -30,18 +31,21 @@ pub fn render_genome(
     y_offset += TRACK_SPACING;
 
     // Draw sequence (if zoomed in enough)
-    if viewport.width() < 1000 {
+    if viewport.width() < 1000
+    {
         y_offset = draw_sequence(painter, rect, chromosome, viewport, y_offset);
         y_offset += TRACK_SPACING;
     }
 
     // Draw features
-    if let Some(tree) = interval_tree {
+    if let Some(tree) = interval_tree
+    {
         draw_features(painter, rect, features, viewport, tree, chr_name, y_offset);
     }
 }
 
-fn draw_ruler(painter: &Painter, rect: Rect, viewport: &Viewport, y_offset: f32) -> f32 {
+fn draw_ruler(painter: &Painter, rect: Rect, viewport: &Viewport, y_offset: f32) -> f32
+{
     let ruler_rect = Rect::from_min_size(
         Pos2::new(rect.left(), y_offset),
         Vec2::new(rect.width(), RULER_HEIGHT),
@@ -56,7 +60,8 @@ fn draw_ruler(painter: &Painter, rect: Rect, viewport: &Viewport, y_offset: f32)
 
     let first_tick = ((viewport.start / tick_interval) + 1) * tick_interval;
 
-    for tick in (first_tick..viewport.end).step_by(tick_interval) {
+    for tick in (first_tick..viewport.end).step_by(tick_interval)
+    {
         let x = viewport.position_to_screen(tick, rect.width()) + rect.left();
 
         // Tick line
@@ -88,7 +93,8 @@ fn draw_gc_content(
     chromosome: &Chromosome,
     viewport: &Viewport,
     y_offset: f32,
-) -> f32 {
+) -> f32
+{
     let gc_rect = Rect::from_min_size(
         Pos2::new(rect.left(), y_offset),
         Vec2::new(rect.width(), GC_CONTENT_HEIGHT),
@@ -111,7 +117,8 @@ fn draw_gc_content(
     let window_size = (viewport.width() / rect.width() as usize).max(100);
     let mut points = Vec::new();
 
-    for i in (viewport.start..viewport.end).step_by(window_size.max(1)) {
+    for i in (viewport.start..viewport.end).step_by(window_size.max(1))
+    {
         let gc = chromosome.get_gc_content(i, (i + window_size).min(viewport.end));
         let x = viewport.position_to_screen(i, rect.width()) + rect.left();
         let y = gc_rect.bottom() - (gc * GC_CONTENT_HEIGHT);
@@ -119,8 +126,10 @@ fn draw_gc_content(
     }
 
     // Draw GC content line
-    if points.len() > 1 {
-        for window in points.windows(2) {
+    if points.len() > 1
+    {
+        for window in points.windows(2)
+        {
             painter.line_segment(
                 [window[0], window[1]],
                 Stroke::new(2.0, Color32::from_rgb(70, 130, 180)),
@@ -146,7 +155,8 @@ fn draw_sequence(
     chromosome: &Chromosome,
     viewport: &Viewport,
     y_offset: f32,
-) -> f32 {
+) -> f32
+{
     let seq_rect = Rect::from_min_size(
         Pos2::new(rect.left(), y_offset),
         Vec2::new(rect.width(), SEQUENCE_HEIGHT),
@@ -156,13 +166,17 @@ fn draw_sequence(
 
     let pixels_per_base = rect.width() / viewport.width() as f32;
 
-    if pixels_per_base >= 8.0 {
+    if pixels_per_base >= 8.0
+    {
         // Draw individual bases
-        for pos in viewport.start..viewport.end.min(chromosome.length) {
-            if let Some(base) = chromosome.get_base_at(pos) {
+        for pos in viewport.start..viewport.end.min(chromosome.length)
+        {
+            if let Some(base) = chromosome.get_base_at(pos)
+            {
                 let x = viewport.position_to_screen(pos, rect.width()) + rect.left();
 
-                let color = match base {
+                let color = match base
+                {
                     'A' => Color32::from_rgb(0, 200, 0),
                     'T' => Color32::from_rgb(200, 0, 0),
                     'G' => Color32::from_rgb(0, 0, 200),
@@ -179,13 +193,18 @@ fn draw_sequence(
                 );
             }
         }
-    } else {
+    }
+    else
+    {
         // Draw colored bars representing base composition
-        for pos in viewport.start..viewport.end.min(chromosome.length) {
-            if let Some(base) = chromosome.get_base_at(pos) {
+        for pos in viewport.start..viewport.end.min(chromosome.length)
+        {
+            if let Some(base) = chromosome.get_base_at(pos)
+            {
                 let x = viewport.position_to_screen(pos, rect.width()) + rect.left();
 
-                let color = match base {
+                let color = match base
+                {
                     'A' => Color32::from_rgb(0, 200, 0),
                     'T' => Color32::from_rgb(200, 0, 0),
                     'G' => Color32::from_rgb(0, 0, 200),
@@ -216,45 +235,53 @@ fn draw_features(
     interval_tree: &IntervalTree,
     chr_name: &str,
     y_offset: f32,
-) {
+)
+{
     // Query features in viewport
     let feature_indices = interval_tree.query(chr_name, viewport.start, viewport.end);
 
-    if feature_indices.is_empty() {
+    if feature_indices.is_empty()
+    {
         return;
     }
 
     // Group features by type for different tracks
     let mut tracks: Vec<Vec<usize>> = Vec::new();
 
-    for &idx in &feature_indices {
+    for &idx in &feature_indices
+    {
         let feature = &features[idx];
 
         // Find a track where this feature fits
         let mut placed = false;
-        for track in &mut tracks {
+        for track in &mut tracks
+        {
             let can_place = track.iter().all(|&other_idx| {
                 let other = &features[other_idx];
                 feature.start >= other.end || feature.end <= other.start
             });
 
-            if can_place {
+            if can_place
+            {
                 track.push(idx);
                 placed = true;
                 break;
             }
         }
 
-        if !placed {
+        if !placed
+        {
             tracks.push(vec![idx]);
         }
     }
 
     // Draw each track
-    for (track_idx, track) in tracks.iter().enumerate() {
+    for (track_idx, track) in tracks.iter().enumerate()
+    {
         let track_y = y_offset + (track_idx as f32 * (FEATURE_TRACK_HEIGHT + TRACK_SPACING));
 
-        for &idx in track {
+        for &idx in track
+        {
             let feature = &features[idx];
             draw_feature(painter, rect, feature, viewport, track_y);
         }
@@ -267,7 +294,8 @@ fn draw_feature(
     feature: &Feature,
     viewport: &Viewport,
     y_offset: f32,
-) {
+)
+{
     let start_x = viewport.position_to_screen(feature.start, rect.width()) + rect.left();
     let end_x = viewport.position_to_screen(feature.end, rect.width()) + rect.left();
 
@@ -281,8 +309,10 @@ fn draw_feature(
     painter.rect_stroke(feature_rect, 2.0, Stroke::new(1.0, Color32::BLACK));
 
     // Draw strand indicator
-    match feature.strand {
-        crate::gff::Strand::Forward => {
+    match feature.strand
+    {
+        crate::gff::Strand::Forward =>
+        {
             let arrow_x = feature_rect.right() - 5.0;
             painter.line_segment(
                 [
@@ -299,7 +329,8 @@ fn draw_feature(
                 Stroke::new(2.0, Color32::BLACK),
             );
         }
-        crate::gff::Strand::Reverse => {
+        crate::gff::Strand::Reverse =>
+        {
             let arrow_x = feature_rect.left() + 5.0;
             painter.line_segment(
                 [
@@ -316,11 +347,13 @@ fn draw_feature(
                 Stroke::new(2.0, Color32::BLACK),
             );
         }
-        _ => {}
+        _ =>
+        {}
     }
 
     // Draw label if there's enough space
-    if feature_rect.width() > 50.0 {
+    if feature_rect.width() > 50.0
+    {
         painter.text(
             feature_rect.center(),
             egui::Align2::CENTER_CENTER,
@@ -331,13 +364,17 @@ fn draw_feature(
     }
 }
 
-fn calculate_tick_interval(width: usize) -> usize {
-    let base_intervals = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000,
-                          10_000, 20_000, 50_000, 100_000, 200_000, 500_000,
-                          1_000_000, 2_000_000, 5_000_000, 10_000_000];
+fn calculate_tick_interval(width: usize) -> usize
+{
+    let base_intervals = [
+        1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10_000, 20_000, 50_000, 100_000,
+        200_000, 500_000, 1_000_000, 2_000_000, 5_000_000, 10_000_000,
+    ];
 
-    for &interval in &base_intervals {
-        if width / interval < 10 {
+    for &interval in &base_intervals
+    {
+        if width / interval < 10
+        {
             return interval;
         }
     }
@@ -345,12 +382,18 @@ fn calculate_tick_interval(width: usize) -> usize {
     10_000_000
 }
 
-fn format_position(pos: usize) -> String {
-    if pos >= 1_000_000 {
+fn format_position(pos: usize) -> String
+{
+    if pos >= 1_000_000
+    {
         format!("{:.1}M", pos as f32 / 1_000_000.0)
-    } else if pos >= 1_000 {
+    }
+    else if pos >= 1_000
+    {
         format!("{:.1}K", pos as f32 / 1_000.0)
-    } else {
+    }
+    else
+    {
         pos.to_string()
     }
 }
