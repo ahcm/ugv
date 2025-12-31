@@ -185,13 +185,25 @@ Due to browser security restrictions, the WebAssembly version:
 
 ### Using the WASM Version
 
-1. Enter the full HTTP/HTTPS URL to your genome file
+The WebAssembly version supports two methods for loading files:
+
+#### Method 1: Drag and Drop (Recommended)
+1. Drag a FASTA or GFF/GTF file from your computer onto the browser window
+2. The file will be automatically detected by extension and loaded
+3. Supports both plain and gzipped files (`.gz`)
+4. A visual overlay appears when hovering with files
+
+#### Method 2: HTTP/HTTPS URL
+1. Enter the full URL to your genome file in the URL field
    - Example: `https://ftp.ensembl.org/pub/release-115/fasta/bos_taurus/dna_index/Bos_taurus.ARS-UCD2.0.dna.toplevel.fa.gz`
 2. Click "Load" and wait for the file to download and parse
-3. The status bar will show loading progress
-4. Once loaded, you can navigate the genome normally
+3. Useful for loading files from public genome databases
 
-**Note**: Large genome files may take time to download and parse. The viewer will show a "Loading..." message during this process.
+**Loading Progress:**
+- Status bar shows current operation ("Loading FASTA from...")
+- Large files may take time to download and parse
+- Gzipped files are automatically decompressed
+- File name is displayed once loaded
 
 ## License
 

@@ -87,6 +87,10 @@ struct GenomeViewer
     genome_promise: GenomePromise,
     #[cfg(target_arch = "wasm32")]
     features_promise: FeaturesPromise,
+    #[cfg(target_arch = "wasm32")]
+    fasta_file_name: String,
+    #[cfg(target_arch = "wasm32")]
+    gff_file_name: String,
 }
 
 impl GenomeViewer
@@ -112,6 +116,10 @@ impl GenomeViewer
             genome_promise: egui::mutex::Mutex::new(None),
             #[cfg(target_arch = "wasm32")]
             features_promise: egui::mutex::Mutex::new(None),
+            #[cfg(target_arch = "wasm32")]
+            fasta_file_name: String::new(),
+            #[cfg(target_arch = "wasm32")]
+            gff_file_name: String::new(),
         }
     }
 
@@ -357,7 +365,7 @@ impl GenomeViewer
     {
         if self.fasta_path.is_empty()
         {
-            self.status_message = "Error: No FASTA path specified".to_string();
+            self.status_message = "Error: No FASTA path/URL specified".to_string();
             return;
         }
 
@@ -367,6 +375,28 @@ impl GenomeViewer
         let promise = poll_promise::Promise::spawn_local(async move {
             let data = file_loader::load_file_async(&path).await?;
             let is_gzipped = path.ends_with(".gz");
+            fasta::Genome::from_bytes(data, is_gzipped)
+        });
+
+        *self.genome_promise.lock() = Some(promise);
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn load_fasta_from_file(&mut self, file: web_sys::File)
+    {
+        let file_name = file.name();
+        self.fasta_file_name = file_name.clone();
+        self.status_message = format!("Loading FASTA from {}...", file_name);
+
+        let is_gzipped = file_name.ends_with(".gz");
+
+        let promise = poll_promise::Promise::spawn_local(async move {
+            use gloo_file::futures::read_as_bytes;
+
+            let data = read_as_bytes(&file.into())
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to read file: {:?}", e))?;
+
             fasta::Genome::from_bytes(data, is_gzipped)
         });
 
@@ -436,7 +466,7 @@ impl GenomeViewer
     {
         if self.gff_path.is_empty()
         {
-            self.status_message = "Error: No GFF path specified".to_string();
+            self.status_message = "Error: No GFF path/URL specified".to_string();
             return;
         }
 
@@ -446,6 +476,28 @@ impl GenomeViewer
         let promise = poll_promise::Promise::spawn_local(async move {
             let data = file_loader::load_file_async(&path).await?;
             let is_gzipped = path.ends_with(".gz");
+            gff::parse_gff_bytes(data, is_gzipped)
+        });
+
+        *self.features_promise.lock() = Some(promise);
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn load_gff_from_file(&mut self, file: web_sys::File)
+    {
+        let file_name = file.name();
+        self.gff_file_name = file_name.clone();
+        self.status_message = format!("Loading GFF from {}...", file_name);
+
+        let is_gzipped = file_name.ends_with(".gz");
+
+        let promise = poll_promise::Promise::spawn_local(async move {
+            use gloo_file::futures::read_as_bytes;
+
+            let data = read_as_bytes(&file.into())
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to read file: {:?}", e))?;
+
             gff::parse_gff_bytes(data, is_gzipped)
         });
 
@@ -490,6 +542,54 @@ impl eframe::App for GenomeViewer
         {
             self.check_genome_promise();
             self.check_features_promise();
+
+            // Handle drag and drop files
+            ctx.input(|i| {
+                if !i.raw.dropped_files.is_empty()
+                {
+                    for file in &i.raw.dropped_files
+                    {
+                        if let Some(bytes) = &file.bytes
+                        {
+                            // File already loaded as bytes
+                            let name = file.name.clone();
+                            let is_gzipped = name.ends_with(".gz");
+
+                            // Detect file type by extension
+                            let lower_name = name.to_lowercase();
+                            if lower_name.contains(".fasta")
+                                || lower_name.contains(".fa")
+                                || lower_name.contains(".fna")
+                                || lower_name.contains(".ffn")
+                                || lower_name.contains(".faa")
+                                || lower_name.contains(".frn")
+                            {
+                                // Load as FASTA
+                                self.fasta_file_name = name.clone();
+                                self.status_message = format!("Loading FASTA from {}...", name);
+
+                                let data = bytes.clone().to_vec();
+                                let promise = poll_promise::Promise::spawn_local(async move {
+                                    fasta::Genome::from_bytes(data, is_gzipped)
+                                });
+                                *self.genome_promise.lock() = Some(promise);
+                            }
+                            else if lower_name.contains(".gff") || lower_name.contains(".gtf")
+                            {
+                                // Load as GFF/GTF
+                                self.gff_file_name = name.clone();
+                                self.status_message = format!("Loading GFF from {}...", name);
+
+                                let data = bytes.clone().to_vec();
+                                let promise = poll_promise::Promise::spawn_local(async move {
+                                    gff::parse_gff_bytes(data, is_gzipped)
+                                });
+                                *self.features_promise.lock() = Some(promise);
+                            }
+                        }
+                    }
+                }
+            });
         }
 
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
@@ -525,12 +625,24 @@ impl eframe::App for GenomeViewer
 
                 #[cfg(target_arch = "wasm32")]
                 {
-                    ui.label("FASTA:");
-                    ui.text_edit_singleline(&mut self.fasta_path);
-                    if ui.button("Load").clicked()
-                    {
-                        self.load_fasta();
-                    }
+                    ui.vertical(|ui| {
+                        ui.label("FASTA (drag & drop file or enter URL):");
+
+                        // Show selected file name
+                        if !self.fasta_file_name.is_empty()
+                        {
+                            ui.label(format!("📄 File: {}", self.fasta_file_name));
+                        }
+
+                        ui.horizontal(|ui| {
+                            ui.label("URL:");
+                            ui.text_edit_singleline(&mut self.fasta_path);
+                            if ui.button("Load").clicked()
+                            {
+                                self.load_fasta();
+                            }
+                        });
+                    });
                 }
 
                 ui.separator();
@@ -563,12 +675,24 @@ impl eframe::App for GenomeViewer
 
                 #[cfg(target_arch = "wasm32")]
                 {
-                    ui.label("GFF/GTF:");
-                    ui.text_edit_singleline(&mut self.gff_path);
-                    if ui.button("Load").clicked()
-                    {
-                        self.load_gff();
-                    }
+                    ui.vertical(|ui| {
+                        ui.label("GFF/GTF (drag & drop file or enter URL):");
+
+                        // Show selected file name
+                        if !self.gff_file_name.is_empty()
+                        {
+                            ui.label(format!("📄 File: {}", self.gff_file_name));
+                        }
+
+                        ui.horizontal(|ui| {
+                            ui.label("URL:");
+                            ui.text_edit_singleline(&mut self.gff_path);
+                            if ui.button("Load").clicked()
+                            {
+                                self.load_gff();
+                            }
+                        });
+                    });
                 }
             });
         });
@@ -765,6 +889,35 @@ impl eframe::App for GenomeViewer
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
+            // Show drag-and-drop hint when hovering with files
+            #[cfg(target_arch = "wasm32")]
+            {
+                ctx.input(|i| {
+                    if i.raw.hovered_files.len() > 0
+                    {
+                        let painter = ctx.layer_painter(egui::LayerId::new(
+                            egui::Order::Foreground,
+                            egui::Id::new("file_drop_overlay"),
+                        ));
+
+                        let screen_rect = ctx.screen_rect();
+                        painter.rect_filled(
+                            screen_rect,
+                            0.0,
+                            egui::Color32::from_black_alpha(192),
+                        );
+
+                        painter.text(
+                            screen_rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            "Drop FASTA or GFF/GTF file here",
+                            egui::FontId::proportional(32.0),
+                            egui::Color32::WHITE,
+                        );
+                    }
+                });
+            }
+
             let available_size = ui.available_size();
             let (response, painter) =
                 ui.allocate_painter(available_size, egui::Sense::click_and_drag());

@@ -33,8 +33,10 @@ rfd = "0.15"  # Native file dialogs only
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
-web-sys = "0.3"
+web-sys = { version = "0.3", features = ["Request", "Response", "Window", "File", "FileList", "FileReader", "Blob"] }
 log = "0.4"
+gloo-net = "0.6"          # HTTP requests
+gloo-file = "0.3"         # File reading
 ```
 
 ### 3. Build Process
@@ -121,11 +123,25 @@ wasm_bindgen_futures::spawn_local(async {
 
 ### File Loading in WASM
 
-In WASM builds, users provide file URLs instead of selecting local files:
+The WASM build supports multiple file loading methods:
 
-- Genome files must be served via HTTP/HTTPS
+#### Drag and Drop
+- Users can drag local files directly onto the browser window
+- Files are read using the browser's File API
+- Automatic file type detection based on extension
+- Visual feedback with overlay when hovering with files
+- No need to upload files to a server
+
+#### HTTP/HTTPS URLs
+- Genome files can be loaded from any URL
 - Files can be hosted on the same origin or via CORS-enabled servers
 - Example: `https://example.com/genomes/chr1.fasta.gz`
+- Useful for loading from public genome databases like Ensembl, NCBI
+
+#### File Format Support
+- FASTA files: `.fasta`, `.fa`, `.fna`, `.ffn`, `.faa`, `.frn`
+- GFF/GTF files: `.gff`, `.gff3`, `.gtf`
+- All formats support gzip compression (`.gz` extension)
 
 ## Deployment Options
 
@@ -149,15 +165,25 @@ If loading genome files from external sources, ensure:
 - The hosting server has CORS headers configured
 - `Access-Control-Allow-Origin` permits your domain
 
+## Implemented Features
+
+WASM-specific features already implemented:
+
+1. ✅ **Drag & Drop**: Drag genome files onto the browser window
+2. ✅ **File API**: Uses browser File API for local file access
+3. ✅ **HTTP Loading**: Load files from URLs (Ensembl, NCBI, etc.)
+4. ✅ **Gzip Support**: Automatic decompression of `.gz` files
+5. ✅ **Visual Feedback**: Overlay when hovering with files
+
 ## Future Enhancements
 
-Potential WASM-specific improvements:
+Potential improvements:
 
-1. **Drag & Drop**: Support dragging genome files onto the browser
-2. **File API**: Use browser File API for local file access
-3. **IndexedDB**: Cache loaded genomes in browser storage
-4. **SharedArrayBuffer**: Enable for multi-threading (requires secure context)
-5. **Streaming**: Progressive loading of large genome files
+1. **IndexedDB**: Cache loaded genomes in browser storage for faster reload
+2. **SharedArrayBuffer**: Enable for multi-threading (requires secure context)
+3. **Streaming**: Progressive loading of large genome files
+4. **Service Worker**: Offline support and background file processing
+5. **Chunked Loading**: Load only visible chromosome regions for very large genomes
 
 ## Troubleshooting
 
