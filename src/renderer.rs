@@ -23,53 +23,12 @@ const VARIANT_TRACK_HEIGHT: f32 = 30.0;
 // TSV track constants
 const TSV_TRACK_HEIGHT: f32 = 100.0;
 
-pub fn render_genome(
-    painter: &Painter,
-    rect: Rect,
-    chromosome: &Chromosome,
-    viewport: &Viewport,
-    features: &[Feature],
-    interval_tree: Option<&IntervalTree>,
-    chr_name: &str,
-    show_amino_acids: bool,
-)
-{
-    let mut y_offset = rect.top();
-
-    // Draw ruler
-    y_offset = draw_ruler(painter, rect, viewport, y_offset);
-    y_offset += TRACK_SPACING;
-
-    // Draw GC content plot
-    y_offset = draw_gc_content(painter, rect, chromosome, viewport, y_offset);
-    y_offset += TRACK_SPACING;
-
-    // Draw sequence (if zoomed in enough)
-    if viewport.width() < 1000
-    {
-        y_offset = draw_sequence(painter, rect, chromosome, viewport, y_offset);
-        y_offset += TRACK_SPACING;
-    }
-
-    // Draw amino acid frames (if enabled and zoomed in enough)
-    if show_amino_acids && viewport.width() < 5000
-    {
-        y_offset = draw_amino_acid_frames(painter, rect, chromosome, viewport, y_offset);
-        y_offset += TRACK_SPACING;
-    }
-
-    // Draw features
-    if let Some(tree) = interval_tree
-    {
-        draw_features(painter, rect, features, viewport, tree, chr_name, y_offset);
-    }
-}
-
-fn draw_ruler(painter: &Painter, rect: Rect, viewport: &Viewport, y_offset: f32) -> f32
+// Make these functions public so they can be called from main.rs
+pub fn draw_ruler(painter: &Painter, rect: Rect, viewport: &Viewport, y_offset: f32, height: f32) -> f32
 {
     let ruler_rect = Rect::from_min_size(
         Pos2::new(rect.left(), y_offset),
-        Vec2::new(rect.width(), RULER_HEIGHT),
+        Vec2::new(rect.width(), height),
     );
 
     // Background
@@ -108,17 +67,18 @@ fn draw_ruler(painter: &Painter, rect: Rect, viewport: &Viewport, y_offset: f32)
     ruler_rect.bottom()
 }
 
-fn draw_gc_content(
+pub fn draw_gc_content(
     painter: &Painter,
     rect: Rect,
     chromosome: &Chromosome,
     viewport: &Viewport,
     y_offset: f32,
+    height: f32,
 ) -> f32
 {
     let gc_rect = Rect::from_min_size(
         Pos2::new(rect.left(), y_offset),
-        Vec2::new(rect.width(), GC_CONTENT_HEIGHT),
+        Vec2::new(rect.width(), height),
     );
 
     // Background
@@ -142,7 +102,7 @@ fn draw_gc_content(
     {
         let gc = chromosome.get_gc_content(i, (i + window_size).min(viewport.end));
         let x = viewport.position_to_screen(i, rect.width()) + rect.left();
-        let y = gc_rect.bottom() - (gc * GC_CONTENT_HEIGHT);
+        let y = gc_rect.bottom() - (gc * height);
         points.push(Pos2::new(x, y));
     }
 
@@ -170,17 +130,18 @@ fn draw_gc_content(
     gc_rect.bottom()
 }
 
-fn draw_sequence(
+pub fn draw_sequence(
     painter: &Painter,
     rect: Rect,
     chromosome: &Chromosome,
     viewport: &Viewport,
     y_offset: f32,
+    height: f32,
 ) -> f32
 {
     let seq_rect = Rect::from_min_size(
         Pos2::new(rect.left(), y_offset),
-        Vec2::new(rect.width(), SEQUENCE_HEIGHT),
+        Vec2::new(rect.width(), height),
     );
 
     painter.rect_filled(seq_rect, 0.0, Color32::from_gray(245));
@@ -248,12 +209,13 @@ fn draw_sequence(
     seq_rect.bottom()
 }
 
-fn draw_amino_acid_frames(
+pub fn draw_amino_acid_frames(
     painter: &Painter,
     rect: Rect,
     chromosome: &Chromosome,
     viewport: &Viewport,
     y_offset: f32,
+    height: f32,
 ) -> f32
 {
     // Get the visible sequence
@@ -271,10 +233,12 @@ fn draw_amino_acid_frames(
     // Translate all 6 frames
     let (forward_frames, reverse_frames) = translation::translate_six_frames(sequence);
 
-    let total_height = AMINO_ACID_TRACK_HEIGHT * 6.0 + TRACK_SPACING * 5.0;
+    // Divide height equally among 6 frames
+    let frame_height = height / 6.0;
+
     let frame_rect = Rect::from_min_size(
         Pos2::new(rect.left(), y_offset),
-        Vec2::new(rect.width(), total_height),
+        Vec2::new(rect.width(), height),
     );
 
     // Background
@@ -294,9 +258,10 @@ fn draw_amino_acid_frames(
             sequence_length,
             frame_idx,
             current_y,
+            frame_height,
             true, // forward strand
         );
-        current_y += AMINO_ACID_TRACK_HEIGHT;
+        current_y += frame_height;
     }
 
     // Draw reverse frames (bottom 3)
@@ -311,9 +276,10 @@ fn draw_amino_acid_frames(
             sequence_length,
             frame_idx,
             current_y,
+            frame_height,
             false, // reverse strand
         );
-        current_y += AMINO_ACID_TRACK_HEIGHT;
+        current_y += frame_height;
     }
 
     frame_rect.bottom()
@@ -328,12 +294,13 @@ fn draw_single_frame(
     sequence_length: usize,
     frame: usize,
     y_offset: f32,
+    height: f32,
     is_forward: bool,
 )
 {
     let track_rect = Rect::from_min_size(
         Pos2::new(rect.left(), y_offset),
-        Vec2::new(rect.width(), AMINO_ACID_TRACK_HEIGHT),
+        Vec2::new(rect.width(), height),
     );
 
     // Draw background
@@ -441,7 +408,7 @@ fn get_amino_acid_color(aa: char) -> Color32
     }
 }
 
-fn draw_features(
+pub fn draw_features(
     painter: &Painter,
     rect: Rect,
     features: &[Feature],
@@ -449,14 +416,15 @@ fn draw_features(
     interval_tree: &IntervalTree,
     chr_name: &str,
     y_offset: f32,
-)
+    height: f32,
+) -> f32
 {
     // Query features in viewport
     let feature_indices = interval_tree.query(chr_name, viewport.start, viewport.end);
 
     if feature_indices.is_empty()
     {
-        return;
+        return y_offset;
     }
 
     // Group features by type for different tracks
@@ -489,17 +457,27 @@ fn draw_features(
         }
     }
 
+    // Calculate row height based on total height and number of rows
+    let num_rows = tracks.len().max(1);
+    let row_height = if num_rows > 1 {
+        (height - (TRACK_SPACING * (num_rows - 1) as f32)) / num_rows as f32
+    } else {
+        height
+    };
+
     // Draw each track
     for (track_idx, track) in tracks.iter().enumerate()
     {
-        let track_y = y_offset + (track_idx as f32 * (FEATURE_TRACK_HEIGHT + TRACK_SPACING));
+        let track_y = y_offset + (track_idx as f32 * (row_height + TRACK_SPACING));
 
         for &idx in track
         {
             let feature = &features[idx];
-            draw_feature(painter, rect, feature, viewport, track_y);
+            draw_feature(painter, rect, feature, viewport, track_y, row_height);
         }
     }
+
+    y_offset + height
 }
 
 fn draw_feature(
@@ -508,6 +486,7 @@ fn draw_feature(
     feature: &Feature,
     viewport: &Viewport,
     y_offset: f32,
+    height: f32,
 )
 {
     let start_x = viewport.position_to_screen(feature.start, rect.width()) + rect.left();
@@ -515,7 +494,7 @@ fn draw_feature(
 
     let feature_rect = Rect::from_min_size(
         Pos2::new(start_x, y_offset),
-        Vec2::new((end_x - start_x).max(2.0), FEATURE_TRACK_HEIGHT),
+        Vec2::new((end_x - start_x).max(2.0), height),
     );
 
     // Draw feature box
@@ -623,11 +602,12 @@ pub fn draw_coverage_track(
     track: &AlignmentTrack,
     viewport: &Viewport,
     y_offset: f32,
+    height: f32,
 ) -> f32
 {
     let track_rect = Rect::from_min_size(
         Pos2::new(rect.left(), y_offset),
-        Vec2::new(rect.width(), COVERAGE_TRACK_HEIGHT),
+        Vec2::new(rect.width(), height),
     );
 
     // Background
@@ -668,12 +648,12 @@ pub fn draw_coverage_track(
 
         let x = viewport.position_to_screen(point.position, rect.width()) + rect.left();
         let bar_width = (rect.width() / viewport.width() as f32 * bin_size as f32).max(1.0);
-        let height = (point.depth as f32 / max_depth as f32) * (COVERAGE_TRACK_HEIGHT - 20.0);
-        let y = track_rect.bottom() - height - 5.0;
+        let bar_height = (point.depth as f32 / max_depth as f32) * (height - 20.0);
+        let y = track_rect.bottom() - bar_height - 5.0;
 
         let color = Color32::from_rgb(100, 150, 200);
         painter.rect_filled(
-            Rect::from_min_size(Pos2::new(x, y), Vec2::new(bar_width, height)),
+            Rect::from_min_size(Pos2::new(x, y), Vec2::new(bar_width, bar_height)),
             0.0,
             color,
         );
@@ -699,6 +679,7 @@ pub fn draw_alignments(
     track: &AlignmentTrack,
     viewport: &Viewport,
     y_offset: f32,
+    height: f32,
 ) -> f32
 {
     // Filter reads in viewport
@@ -734,13 +715,21 @@ pub fn draw_alignments(
         MAX_ALIGNMENT_ROWS,
     );
 
-    let total_height = (rows.len() as f32 * (ALIGNMENT_ROW_HEIGHT + 2.0))
-        .min(MAX_ALIGNMENT_ROWS as f32 * (ALIGNMENT_ROW_HEIGHT + 2.0));
+    // Calculate row height based on total height
+    let label_height = 20.0;
+    let available_height = height - label_height;
+    let num_rows = rows.len().min(MAX_ALIGNMENT_ROWS);
+    let row_spacing = 2.0;
+    let row_height = if num_rows > 0 {
+        ((available_height - (num_rows as f32 - 1.0) * row_spacing) / num_rows as f32).max(1.0)
+    } else {
+        12.0
+    };
 
     // Background
     let track_rect = Rect::from_min_size(
         Pos2::new(rect.left(), y_offset),
-        Vec2::new(rect.width(), total_height + 20.0),
+        Vec2::new(rect.width(), height),
     );
     painter.rect_filled(track_rect, 0.0, Color32::from_gray(245));
 
@@ -756,14 +745,14 @@ pub fn draw_alignments(
     // Draw reads
     for (row_idx, row) in rows.iter().enumerate()
     {
-        let row_y = y_offset + 20.0 + (row_idx as f32 * (ALIGNMENT_ROW_HEIGHT + 2.0));
+        let row_y = y_offset + label_height + (row_idx as f32 * (row_height + row_spacing));
 
         for &read_idx in row
         {
             if read_idx < track.records.len()
             {
                 let read = &track.records[read_idx];
-                draw_single_read(painter, &rect, read, viewport, row_y);
+                draw_single_read(painter, &rect, read, viewport, row_y, row_height);
             }
         }
     }
@@ -778,6 +767,7 @@ fn draw_single_read(
     read: &AlignmentRecord,
     viewport: &Viewport,
     y: f32,
+    height: f32,
 )
 {
     let start_x = viewport.position_to_screen(read.reference_start, rect.width()) + rect.left();
@@ -798,7 +788,7 @@ fn draw_single_read(
         Color32::from_rgba_premultiplied(base_color.r(), base_color.g(), base_color.b(), alpha);
 
     let read_rect =
-        Rect::from_min_size(Pos2::new(start_x, y), Vec2::new(width, ALIGNMENT_ROW_HEIGHT));
+        Rect::from_min_size(Pos2::new(start_x, y), Vec2::new(width, height));
 
     painter.rect_filled(read_rect, 1.0, color);
     painter.rect_stroke(read_rect, 1.0, Stroke::new(0.5, Color32::from_gray(100)));
@@ -811,11 +801,12 @@ pub fn draw_variant_summary(
     track: &AlignmentTrack,
     viewport: &Viewport,
     y_offset: f32,
+    height: f32,
 ) -> f32
 {
     let track_rect = Rect::from_min_size(
         Pos2::new(rect.left(), y_offset),
-        Vec2::new(rect.width(), VARIANT_TRACK_HEIGHT),
+        Vec2::new(rect.width(), height),
     );
 
     // Background
@@ -861,7 +852,7 @@ pub fn draw_variant_summary(
     {
         let x = viewport.position_to_screen(pos, rect.width()) + rect.left();
         let total = snps + ins + del;
-        let height = ((total as f32 / 10.0).min(1.0) * (VARIANT_TRACK_HEIGHT - 15.0)).max(2.0);
+        let bar_height = ((total as f32 / 10.0).min(1.0) * (height - 15.0)).max(2.0);
         let y_bottom = track_rect.bottom() - 5.0;
 
         // Draw stacked bars
@@ -869,7 +860,7 @@ pub fn draw_variant_summary(
 
         if del > 0
         {
-            let del_height = (del as f32 / total as f32) * height;
+            let del_height = (del as f32 / total as f32) * bar_height;
             painter.rect_filled(
                 Rect::from_min_size(
                     Pos2::new(x - 1.0, current_y - del_height),
@@ -883,7 +874,7 @@ pub fn draw_variant_summary(
 
         if ins > 0
         {
-            let ins_height = (ins as f32 / total as f32) * height;
+            let ins_height = (ins as f32 / total as f32) * bar_height;
             painter.rect_filled(
                 Rect::from_min_size(
                     Pos2::new(x - 1.0, current_y - ins_height),
@@ -897,7 +888,7 @@ pub fn draw_variant_summary(
 
         if snps > 0
         {
-            let snp_height = (snps as f32 / total as f32) * height;
+            let snp_height = (snps as f32 / total as f32) * bar_height;
             painter.rect_filled(
                 Rect::from_min_size(
                     Pos2::new(x - 1.0, current_y - snp_height),
@@ -917,14 +908,14 @@ pub fn draw_tsv_track(
     painter: &Painter,
     rect: Rect,
     track: &TsvChromosomeTrack,
-    track_name: &str,
     viewport: &Viewport,
     y_offset: f32,
+    height: f32,
 ) -> f32
 {
     let track_rect = Rect::from_min_size(
         Pos2::new(rect.left(), y_offset),
-        Vec2::new(rect.width(), TSV_TRACK_HEIGHT),
+        Vec2::new(rect.width(), height),
     );
 
     // Draw track background
@@ -941,7 +932,7 @@ pub fn draw_tsv_track(
     painter.text(
         Pos2::new(rect.left() + 5.0, y_offset + 5.0),
         egui::Align2::LEFT_TOP,
-        track_name,
+        "Custom Track",
         FontId::proportional(12.0),
         Color32::from_gray(100),
     );
@@ -952,13 +943,13 @@ pub fn draw_tsv_track(
     if points.is_empty()
     {
         painter.text(
-            Pos2::new(rect.center().x, y_offset + TSV_TRACK_HEIGHT / 2.0),
+            Pos2::new(rect.center().x, y_offset + height / 2.0),
             egui::Align2::CENTER_CENTER,
             "No data in this region",
             FontId::proportional(12.0),
             Color32::from_gray(150),
         );
-        return track_rect.bottom() + TRACK_SPACING;
+        return track_rect.bottom();
     }
 
     // Calculate value range for this view
@@ -968,7 +959,7 @@ pub fn draw_tsv_track(
 
     // Draw scale labels
     let label_y_top = y_offset + 20.0;
-    let label_y_bottom = y_offset + TSV_TRACK_HEIGHT - 5.0;
+    let label_y_bottom = y_offset + height - 5.0;
 
     painter.text(
         Pos2::new(rect.left() + 5.0, label_y_top),
@@ -990,7 +981,7 @@ pub fn draw_tsv_track(
     if min_signal <= 0.0 && max_signal >= 0.0 && signal_range > 0.0
     {
         let zero_y = y_offset + 25.0
-            + (TSV_TRACK_HEIGHT - 30.0) * (1.0 - ((0.0 - min_signal) / signal_range) as f32);
+            + (height - 30.0) * (1.0 - ((0.0 - min_signal) / signal_range) as f32);
         painter.line_segment(
             [
                 Pos2::new(rect.left() + 50.0, zero_y),
@@ -1002,7 +993,7 @@ pub fn draw_tsv_track(
 
     // Draw data as line graph
     let data_area_top = y_offset + 25.0;
-    let data_area_height = TSV_TRACK_HEIGHT - 30.0;
+    let data_area_height = height - 30.0;
 
     let mut prev_pos: Option<Pos2> = None;
 

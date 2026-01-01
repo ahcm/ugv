@@ -2171,137 +2171,177 @@ impl eframe::App for GenomeViewer
                 }
             }
 
-            // Render genome
+            // Render genome using track configuration
             if let (Some(ref genome), Some(ref chr_name)) =
                 (&self.genome, &self.selected_chromosome)
             {
                 if let Some(chr) = genome.chromosomes.get(chr_name)
                 {
-                    renderer::render_genome(
-                        &painter,
-                        response.rect,
-                        chr,
-                        &self.viewport,
-                        &self.features,
-                        self.interval_tree.as_ref(),
-                        chr_name,
-                        self.show_amino_acids,
-                    );
-
-                    // Render BAM tracks (if loaded and selected chromosome matches)
-                    if let Some(ref mut alignments) = self.alignments
+                    // Query BAM region once if needed
+                    let bam_track = if let Some(ref mut alignments) = self.alignments
                     {
-                        // Query the region for the current viewport
                         match alignments.query_region(chr_name, self.viewport.start, self.viewport.end)
                         {
-                            Ok(Some(track)) =>
-                            {
-                                // Start BAM tracks below genome tracks
-                                // Estimate y_offset based on visible genome tracks
-                                let mut bam_y_offset = response.rect.top() + 150.0;
-
-                                // Adjust based on what's visible
-                                if self.viewport.width() < 1000
-                                {
-                                    bam_y_offset += 50.0; // sequence track
-                                }
-                                if self.show_amino_acids && self.viewport.width() < 5000
-                                {
-                                    bam_y_offset += 130.0; // amino acid frames
-                                }
-                                if !self.features.is_empty()
-                                {
-                                    bam_y_offset += 100.0; // feature tracks
-                                }
-
-                                if self.show_coverage
-                                {
-                                    bam_y_offset = renderer::draw_coverage_track(
-                                        &painter,
-                                        response.rect,
-                                        track,
-                                        &self.viewport,
-                                        bam_y_offset,
-                                    );
-                                }
-
-                                if self.show_alignments
-                                {
-                                    bam_y_offset = renderer::draw_alignments(
-                                        &painter,
-                                        response.rect,
-                                        track,
-                                        &self.viewport,
-                                        bam_y_offset,
-                                    );
-                                }
-
-                                if self.show_variants
-                                {
-                                    renderer::draw_variant_summary(
-                                        &painter,
-                                        response.rect,
-                                        track,
-                                        &self.viewport,
-                                        bam_y_offset,
-                                    );
-                                }
-                            }
-                            Ok(None) =>
-                            {
-                                // No data for this chromosome
-                            }
+                            Ok(track) => track,
                             Err(e) =>
                             {
-                                // Error loading region - show message to user
                                 eprintln!("Error querying BAM region: {}", e);
+                                None
                             }
                         }
                     }
-
-                    // Render TSV custom track
-                    if let Some(ref tsv_data) = self.tsv_data
+                    else
                     {
-                        if self.show_tsv_track
+                        None
+                    };
+
+                    // Get TSV track if available
+                    let tsv_track = self.tsv_data.as_ref()
+                        .and_then(|data| data.tracks.get(chr_name));
+
+                    // Render tracks in configured order
+                    let mut y_offset = response.rect.top();
+                    const TRACK_SPACING: f32 = 10.0;
+
+                    for &track_type in &self.track_order
+                    {
+                        let config = self.track_configs.get(&track_type).unwrap();
+                        if !config.visible
                         {
-                            if let Some(tsv_track) = tsv_data.tracks.get(chr_name)
+                            continue;
+                        }
+
+                        match track_type
+                        {
+                            TrackType::Ruler =>
                             {
-                                let mut tsv_y_offset = response.rect.top() + 150.0;
-
-                                if self.show_amino_acids && self.viewport.width() < 5000
-                                {
-                                    tsv_y_offset += 130.0; // amino acid frames
-                                }
-                                if !self.features.is_empty()
-                                {
-                                    tsv_y_offset += 100.0; // feature tracks
-                                }
-
-                                // Add space for BAM tracks if shown
-                                if self.alignments.is_some()
-                                {
-                                    if self.show_coverage
-                                    {
-                                        tsv_y_offset += 90.0;
-                                    }
-                                    if self.show_alignments
-                                    {
-                                        tsv_y_offset += 150.0;
-                                    }
-                                    if self.show_variants
-                                    {
-                                        tsv_y_offset += 40.0;
-                                    }
-                                }
-
-                                renderer::draw_tsv_track(
+                                y_offset = renderer::draw_ruler(
                                     &painter,
                                     response.rect,
-                                    tsv_track,
-                                    &tsv_data.track_name,
                                     &self.viewport,
-                                    tsv_y_offset,
+                                    y_offset,
+                                    config.height,
                                 );
+                                y_offset += TRACK_SPACING;
+                            }
+                            TrackType::GcContent =>
+                            {
+                                y_offset = renderer::draw_gc_content(
+                                    &painter,
+                                    response.rect,
+                                    chr,
+                                    &self.viewport,
+                                    y_offset,
+                                    config.height,
+                                );
+                                y_offset += TRACK_SPACING;
+                            }
+                            TrackType::Sequence =>
+                            {
+                                if self.viewport.width() < 1000
+                                {
+                                    y_offset = renderer::draw_sequence(
+                                        &painter,
+                                        response.rect,
+                                        chr,
+                                        &self.viewport,
+                                        y_offset,
+                                        config.height,
+                                    );
+                                    y_offset += TRACK_SPACING;
+                                }
+                            }
+                            TrackType::AminoAcids =>
+                            {
+                                if self.show_amino_acids && self.viewport.width() < 5000
+                                {
+                                    y_offset = renderer::draw_amino_acid_frames(
+                                        &painter,
+                                        response.rect,
+                                        chr,
+                                        &self.viewport,
+                                        y_offset,
+                                        config.height,
+                                    );
+                                    y_offset += TRACK_SPACING;
+                                }
+                            }
+                            TrackType::Features =>
+                            {
+                                if let Some(tree) = self.interval_tree.as_ref()
+                                {
+                                    y_offset = renderer::draw_features(
+                                        &painter,
+                                        response.rect,
+                                        &self.features,
+                                        &self.viewport,
+                                        tree,
+                                        chr_name,
+                                        y_offset,
+                                        config.height,
+                                    );
+                                    y_offset += TRACK_SPACING;
+                                }
+                            }
+                            TrackType::Coverage =>
+                            {
+                                if let Some(track) = bam_track
+                                {
+                                    y_offset = renderer::draw_coverage_track(
+                                        &painter,
+                                        response.rect,
+                                        track,
+                                        &self.viewport,
+                                        y_offset,
+                                        config.height,
+                                    );
+                                    y_offset += TRACK_SPACING;
+                                }
+                            }
+                            TrackType::Alignments =>
+                            {
+                                if let Some(track) = bam_track
+                                {
+                                    y_offset = renderer::draw_alignments(
+                                        &painter,
+                                        response.rect,
+                                        track,
+                                        &self.viewport,
+                                        y_offset,
+                                        config.height,
+                                    );
+                                    y_offset += TRACK_SPACING;
+                                }
+                            }
+                            TrackType::Variants =>
+                            {
+                                if let Some(track) = bam_track
+                                {
+                                    y_offset = renderer::draw_variant_summary(
+                                        &painter,
+                                        response.rect,
+                                        track,
+                                        &self.viewport,
+                                        y_offset,
+                                        config.height,
+                                    );
+                                    y_offset += TRACK_SPACING;
+                                }
+                            }
+                            TrackType::CustomTsv =>
+                            {
+                                if let Some(track) = tsv_track
+                                {
+                                    y_offset = renderer::draw_tsv_track(
+                                        &painter,
+                                        response.rect,
+                                        track,
+                                        &self.viewport,
+                                        y_offset,
+                                        config.height,
+                                    );
+                                    y_offset += TRACK_SPACING;
+                                }
                             }
                         }
                     }
