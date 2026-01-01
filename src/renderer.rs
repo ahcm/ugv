@@ -624,15 +624,49 @@ pub fn draw_coverage_track(
 
     // Get coverage data for viewport
     let bin_size = 100; // matches the bin size used in coverage calculation
-    let start_bin = viewport.start / bin_size;
-    let end_bin = (viewport.end / bin_size).min(track.coverage.len());
+
+    // Check if we have a loaded region and coverage data
+    if track.coverage.is_empty()
+    {
+        painter.text(
+            Pos2::new(rect.center().x, y_offset + height / 2.0),
+            egui::Align2::CENTER_CENTER,
+            "No coverage data",
+            FontId::proportional(11.0),
+            Color32::from_gray(150),
+        );
+        return track_rect.bottom();
+    }
+
+    // Calculate bin indices relative to loaded region
+    let (region_start, region_end) = track.loaded_region.unwrap_or((0, track.reference_length));
+
+    // Only show coverage if viewport overlaps with loaded region
+    if viewport.end <= region_start || viewport.start >= region_end
+    {
+        painter.text(
+            Pos2::new(rect.center().x, y_offset + height / 2.0),
+            egui::Align2::CENTER_CENTER,
+            "Coverage not loaded for this region",
+            FontId::proportional(11.0),
+            Color32::from_gray(150),
+        );
+        return track_rect.bottom();
+    }
+
+    // Calculate bin indices relative to the loaded region start
+    let viewport_start_in_region = viewport.start.saturating_sub(region_start);
+    let viewport_end_in_region = viewport.end.saturating_sub(region_start);
+
+    let start_bin = viewport_start_in_region / bin_size;
+    let end_bin = ((viewport_end_in_region + bin_size - 1) / bin_size).min(track.coverage.len());
 
     if start_bin >= track.coverage.len()
     {
         painter.text(
             Pos2::new(rect.center().x, y_offset + height / 2.0),
             egui::Align2::CENTER_CENTER,
-            "No coverage data",
+            "No coverage in this region",
             FontId::proportional(11.0),
             Color32::from_gray(150),
         );
