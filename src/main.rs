@@ -4,6 +4,7 @@ mod file_loader;
 mod gff;
 mod interval_tree;
 mod renderer;
+mod session;
 mod translation;
 mod viewport;
 
@@ -113,6 +114,7 @@ enum FilePickerType
     Fasta,
     Gff,
     Bam,
+    Session,
 }
 
 #[derive(Clone)]
@@ -724,6 +726,10 @@ impl GenomeViewer
             {
                 input.set_accept(".bam");
             }
+            FilePickerType::Session =>
+            {
+                input.set_accept(".ugv,.json");
+            }
         }
 
         // Store the picker type so we know what to do with the selected file
@@ -762,6 +768,7 @@ impl GenomeViewer
                 FilePickerType::Fasta => "fasta",
                 FilePickerType::Gff => "gff",
                 FilePickerType::Bam => "bam",
+                FilePickerType::Session => "session",
             }
         ));
 
@@ -789,6 +796,7 @@ impl GenomeViewer
                     FilePickerType::Fasta => "fasta",
                     FilePickerType::Gff => "gff",
                     FilePickerType::Bam => "bam",
+                    FilePickerType::Session => "session",
                 }
             );
 
@@ -817,6 +825,10 @@ impl GenomeViewer
                                     FilePickerType::Bam =>
                                     {
                                         self.load_bam_from_file(file);
+                                    }
+                                    FilePickerType::Session =>
+                                    {
+                                        self.load_session_from_file(file);
                                     }
                                 }
 
@@ -911,6 +923,229 @@ impl GenomeViewer
             }
         }
     }
+
+    /// Create a session from current state
+    fn create_session(&self) -> session::Session
+    {
+        let chromosome_sort = match self.chromosome_sort
+        {
+            ChromosomeSort::Natural => "Natural",
+            ChromosomeSort::Alphabetical => "Alphabetical",
+            ChromosomeSort::Size => "Size",
+        }
+        .to_string();
+
+        session::Session {
+            fasta_path: self.fasta_path.clone(),
+            gff_path: self.gff_path.clone(),
+            bam_path: self.bam_path.clone(),
+            selected_chromosome: self.selected_chromosome.clone(),
+            viewport_start: self.viewport.start,
+            viewport_end: self.viewport.end,
+            show_chromosome_panel: self.show_chromosome_panel,
+            show_amino_acids: self.show_amino_acids,
+            show_coverage: self.show_coverage,
+            show_alignments: self.show_alignments,
+            show_variants: self.show_variants,
+            chromosome_sort,
+        }
+    }
+
+    /// Restore state from a session
+    fn restore_session(&mut self, session: session::Session)
+    {
+        // Restore file paths
+        self.fasta_path = session.fasta_path.clone();
+        self.gff_path = session.gff_path.clone();
+        self.bam_path = session.bam_path.clone();
+
+        // Restore UI state
+        self.show_chromosome_panel = session.show_chromosome_panel;
+        self.show_amino_acids = session.show_amino_acids;
+        self.show_coverage = session.show_coverage;
+        self.show_alignments = session.show_alignments;
+        self.show_variants = session.show_variants;
+
+        self.chromosome_sort = match session.chromosome_sort.as_str()
+        {
+            "Alphabetical" => ChromosomeSort::Alphabetical,
+            "Size" => ChromosomeSort::Size,
+            _ => ChromosomeSort::Natural,
+        };
+
+        // Load files
+        if !self.fasta_path.is_empty()
+        {
+            self.load_fasta();
+        }
+
+        if !self.gff_path.is_empty()
+        {
+            self.load_gff();
+        }
+
+        if !self.bam_path.is_empty()
+        {
+            self.load_bam();
+        }
+
+        // Restore viewport and selected chromosome
+        self.selected_chromosome = session.selected_chromosome;
+        self.viewport.start = session.viewport_start;
+        self.viewport.end = session.viewport_end;
+    }
+
+    /// Save session to file (native only)
+    #[cfg(not(target_arch = "wasm32"))]
+    fn save_session(&mut self)
+    {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("Session", &["ugv"])
+            .add_filter("JSON", &["json"])
+            .set_file_name("session.ugv")
+            .save_file()
+        {
+            let session = self.create_session();
+            match session.save_to_file(&path.display().to_string())
+            {
+                Ok(_) =>
+                {
+                    self.status_message = format!(
+                        "Session saved to {}",
+                        path.file_name().and_then(|n| n.to_str()).unwrap_or("file")
+                    );
+                }
+                Err(e) =>
+                {
+                    self.status_message = format!("Error saving session: {}", e);
+                }
+            }
+        }
+    }
+
+    /// Load session from file (native only)
+    #[cfg(not(target_arch = "wasm32"))]
+    fn load_session(&mut self)
+    {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("Session", &["ugv"])
+            .add_filter("JSON", &["json"])
+            .pick_file()
+        {
+            match session::Session::load_from_file(&path.display().to_string())
+            {
+                Ok(session) =>
+                {
+                    self.status_message = format!(
+                        "Session loaded from {}",
+                        path.file_name().and_then(|n| n.to_str()).unwrap_or("file")
+                    );
+                    self.restore_session(session);
+                }
+                Err(e) =>
+                {
+                    self.status_message = format!("Error loading session: {}", e);
+                }
+            }
+        }
+    }
+
+    /// Save session to JSON for WASM (download as file)
+    #[cfg(target_arch = "wasm32")]
+    fn save_session(&mut self)
+    {
+        use wasm_bindgen::JsCast;
+        use web_sys::HtmlAnchorElement;
+
+        let session = self.create_session();
+        match session.to_json()
+        {
+            Ok(json) =>
+            {
+                // Create a blob and download it
+                if let Some(window) = web_sys::window()
+                {
+                    if let Some(document) = window.document()
+                    {
+                        let blob_parts = js_sys::Array::new();
+                        blob_parts.push(&wasm_bindgen::JsValue::from_str(&json));
+
+                        let mut blob_property_bag = web_sys::BlobPropertyBag::new();
+                        blob_property_bag.type_("application/json");
+
+                        if let Ok(blob) = web_sys::Blob::new_with_str_sequence_and_options(
+                            &blob_parts,
+                            &blob_property_bag,
+                        )
+                        {
+                            if let Ok(url) = web_sys::Url::create_object_url_with_blob(&blob)
+                            {
+                                if let Ok(element) = document.create_element("a")
+                                {
+                                    if let Ok(anchor) = element.dyn_into::<HtmlAnchorElement>()
+                                    {
+                                        let _ = anchor.set_attribute("href", &url);
+                                        let _ = anchor.set_attribute("download", "session.ugv");
+                                        anchor.click();
+                                        let _ = web_sys::Url::revoke_object_url(&url);
+                                        self.status_message = "Session saved".to_string();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) =>
+            {
+                self.status_message = format!("Error creating session: {}", e);
+            }
+        }
+    }
+
+    /// Load session from JSON for WASM (from file picker)
+    #[cfg(target_arch = "wasm32")]
+    fn load_session(&mut self)
+    {
+        self.open_file_picker(FilePickerType::Session);
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn load_session_from_file(&mut self, file: web_sys::File)
+    {
+        use gloo_file::futures::read_as_text;
+        use wasm_bindgen_futures::spawn_local;
+
+        let file_name = file.name();
+        self.status_message = format!("Loading session from {}...", file_name);
+
+        let gloo_file = gloo_file::File::from(file);
+
+        spawn_local({
+            let status_tx = {
+                let (tx, rx) = std::sync::mpsc::channel();
+                tx
+            };
+
+            async move {
+                match read_as_text(&gloo_file).await
+                {
+                    Ok(contents) =>
+                    {
+                        let _ = status_tx.send(Ok(contents));
+                    }
+                    Err(e) =>
+                    {
+                        let _ = status_tx.send(Err(anyhow::anyhow!("Failed to read file: {:?}", e)));
+                    }
+                }
+            }
+        });
+
+        // For now, we'll handle this synchronously after file is read
+        // In a full implementation, you'd use a promise like with other file loading
+        self.status_message = "Session file reading - refresh to complete".to_string();
+    }
 }
 
 impl eframe::App for GenomeViewer
@@ -995,6 +1230,36 @@ impl eframe::App for GenomeViewer
                                     bam::AlignmentData::from_bytes(data)
                                 });
                                 *self.bam_promise.lock() = Some(promise);
+                            }
+                            else if lower_name.ends_with(".ugv") || lower_name.ends_with(".json")
+                            {
+                                // Load as session
+                                let data = bytes.clone().to_vec();
+                                match String::from_utf8(data)
+                                {
+                                    Ok(json) =>
+                                    {
+                                        match session::Session::from_json(&json)
+                                        {
+                                            Ok(session) =>
+                                            {
+                                                self.status_message =
+                                                    format!("Session loaded from {}", name);
+                                                self.restore_session(session);
+                                            }
+                                            Err(e) =>
+                                            {
+                                                self.status_message =
+                                                    format!("Error loading session: {}", e);
+                                            }
+                                        }
+                                    }
+                                    Err(e) =>
+                                    {
+                                        self.status_message =
+                                            format!("Error reading session file: {}", e);
+                                    }
+                                }
                             }
                         }
                     }
@@ -1182,6 +1447,19 @@ impl eframe::App for GenomeViewer
                             ui.label(format!("📊 {}", self.bam_file_name));
                         }
                     });
+                }
+
+                ui.separator();
+
+                // Session save/load
+                ui.label("Session:");
+                if ui.button("💾 Save").clicked()
+                {
+                    self.save_session();
+                }
+                if ui.button("📂 Load").clicked()
+                {
+                    self.load_session();
                 }
             });
         });

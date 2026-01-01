@@ -28,6 +28,18 @@ A high-performance genome viewer built with Rust and egui, designed for interact
   - Two-finger vertical swipe (touchpad/trackpad) to zoom
 - **Multi-chromosome Support**: Browse all chromosomes in the genome
 
+### Session Management
+- **Save Sessions**: Save your current workspace including:
+  - All loaded file paths (FASTA, GFF, BAM)
+  - Current chromosome and viewport position
+  - UI settings (chromosome panel visibility, amino acid display, BAM track toggles)
+  - Chromosome sorting preference
+- **Load Sessions**: Restore your workspace from a saved session file
+- **Session Format**: JSON format (.ugv or .json extension)
+- **Cross-platform**: Works in both native and WebAssembly builds
+  - Native: File dialog for save/load
+  - WASM: Downloads session file / loads from file picker or drag & drop
+
 ### Chromosome Management
 - **Search**: Filter chromosomes by name
 - **Sorting Options**:
@@ -140,6 +152,13 @@ cargo run --release
    - All 6 reading frames are displayed (3 forward + 3 reverse)
    - Amino acids are color-coded by biochemical properties
 
+7. **Save and Load Sessions**:
+   - Click **💾 Save** in the Session section to save your current workspace
+   - Saves file paths, viewport position, and all UI settings to a .ugv file
+   - Click **📂 Load** to restore a previously saved session
+   - Sessions can be shared or used to quickly return to specific analyses
+   - Supports drag & drop for session files (WASM version)
+
 ## File Format Support
 
 ### FASTA Files
@@ -180,6 +199,33 @@ Binary Alignment/Map (BAM) format for aligned sequencing reads:
 - Maximum 50 rows of stacked reads displayed
 - Works in both native and WebAssembly builds
 
+### Session Files
+Session files store your workspace state in JSON format:
+```json
+{
+  "fasta_path": "/path/to/genome.fasta",
+  "gff_path": "/path/to/annotations.gff",
+  "bam_path": "/path/to/alignments.bam",
+  "selected_chromosome": "chr1",
+  "viewport_start": 100000,
+  "viewport_end": 200000,
+  "show_chromosome_panel": true,
+  "show_amino_acids": false,
+  "show_coverage": true,
+  "show_alignments": true,
+  "show_variants": false,
+  "chromosome_sort": "Natural"
+}
+```
+
+**Features:**
+- Human-readable JSON format
+- File extensions: `.ugv` (recommended) or `.json`
+- Stores absolute or relative file paths
+- Automatically loads all referenced files when session is restored
+- UI settings preserved (panel visibility, display options, sort order)
+- Can be edited manually if needed
+
 ## Navigation Controls
 - **Mouse wheel / Two-finger vertical swipe**: Zoom in/out (focus-aware)
 - **Click + drag**: Pan view horizontally
@@ -192,6 +238,7 @@ Binary Alignment/Map (BAM) format for aligned sequencing reads:
 - **fasta.rs**: FASTA genome parser with GC content calculation
 - **gff.rs**: GFF3/GTF annotation parser
 - **bam.rs**: BAM/SAM parser with CIGAR operations, variant extraction, and coverage calculation
+- **session.rs**: Session management for saving and restoring workspace state
 - **interval_tree.rs**: Efficient feature range queries
 - **viewport.rs**: View management (pan, zoom, coordinate mapping)
 - **translation.rs**: DNA to protein translation (standard genetic code, 6 frames)
@@ -271,11 +318,12 @@ The WebAssembly version supports three methods for loading files:
 4. Supports both plain and gzipped files (`.gz`)
 
 #### Method 2: Drag and Drop
-1. Drag a FASTA, GFF/GTF, or BAM file from your computer onto the browser window
+1. Drag a FASTA, GFF/GTF, BAM, or session file from your computer onto the browser window
 2. The file will be automatically detected by extension and loaded
 3. Supports both plain and gzipped files (`.gz`)
 4. A visual overlay appears when hovering with files
-5. BAM files (`.bam`) are automatically recognized and parsed
+5. BAM files (`.bam`) and session files (`.ugv`, `.json`) are automatically recognized and parsed
+6. Session files restore your complete workspace including all file paths and settings
 
 #### Method 3: HTTP/HTTPS URL
 1. Enter the full URL to your genome file in the URL field

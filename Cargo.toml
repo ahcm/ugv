@@ -14,6 +14,8 @@ rayon = "1.10"
 parking_lot = "0.12"
 byteorder = "1.5"
 poll-promise = { version = "0.3", features = ["web"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
 # BAM/SAM file support (pure Rust for WASM compatibility)
 # Using main noodles crate to ensure version compatibility
@@ -26,7 +28,7 @@ rfd = "0.15"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
-web-sys = { version = "0.3", features = ["Request", "RequestInit", "RequestMode", "Response", "Window", "File", "FileList", "FileReader", "Blob", "Document", "Element", "HtmlInputElement", "EventTarget", "Event", "Headers"] }
+web-sys = { version = "0.3", features = ["Request", "RequestInit", "RequestMode", "Response", "Window", "File", "FileList", "FileReader", "Blob", "BlobPropertyBag", "Document", "Element", "HtmlInputElement", "HtmlAnchorElement", "EventTarget", "Event", "Headers", "Url"] }
 log = "0.4"
 gloo-net = "0.6"
 gloo-file = { version = "0.3", features = ["futures"] }
