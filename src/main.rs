@@ -2,6 +2,7 @@ mod bam;
 mod fasta;
 mod file_loader;
 mod gff;
+mod icon;
 mod interval_tree;
 mod renderer;
 mod session;
@@ -18,7 +19,8 @@ fn main() -> Result<()>
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1200.0, 800.0])
-            .with_title("Ultra-Fast Genome Viewer"),
+            .with_title("Ultra-Fast Genome Viewer")
+            .with_icon(icon::create_app_icon()),
         ..Default::default()
     };
 
@@ -33,6 +35,9 @@ fn main()
 
     // Redirect tracing to console.log
     eframe::WebLogger::init(log::LevelFilter::Debug).ok();
+
+    // Set the favicon
+    set_favicon();
 
     let web_options = eframe::WebOptions::default();
 
@@ -53,6 +58,74 @@ fn main()
             .await
             .expect("failed to start eframe");
     });
+}
+
+#[cfg(target_arch = "wasm32")]
+fn set_favicon()
+{
+    use eframe::wasm_bindgen::JsCast as _;
+    use web_sys::HtmlLinkElement;
+
+    let window = web_sys::window().expect("No window");
+    let document = window.document().expect("No document");
+
+    // Create a canvas to render the icon
+    let canvas = document
+        .create_element("canvas")
+        .expect("Failed to create canvas")
+        .dyn_into::<web_sys::HtmlCanvasElement>()
+        .expect("Not a canvas");
+
+    canvas.set_width(64);
+    canvas.set_height(64);
+
+    let context = canvas
+        .get_context("2d")
+        .expect("Failed to get context")
+        .expect("No context")
+        .dyn_into::<web_sys::CanvasRenderingContext2d>()
+        .expect("Not a 2d context");
+
+    // Get icon data
+    let icon = icon::create_app_icon();
+
+    // Create ImageData from icon
+    let image_data = web_sys::ImageData::new_with_u8_clamped_array_and_sh(
+        wasm_bindgen::Clamped(&icon.rgba),
+        icon.width,
+        icon.height,
+    )
+    .expect("Failed to create ImageData");
+
+    context
+        .put_image_data(&image_data, 0.0, 0.0)
+        .expect("Failed to put image data");
+
+    // Convert to data URL
+    let data_url = canvas.to_data_url().expect("Failed to convert to data URL");
+
+    // Set as favicon
+    if let Some(head) = document.head()
+    {
+        // Remove existing favicon if any
+        if let Some(existing) = document.query_selector("link[rel='icon']").ok().flatten()
+        {
+            head.remove_child(&existing).ok();
+        }
+
+        // Create new favicon link
+        let link = document
+            .create_element("link")
+            .expect("Failed to create link")
+            .dyn_into::<HtmlLinkElement>()
+            .expect("Not a link element");
+
+        link.set_rel("icon");
+        link.set_type("image/png");
+        link.set_href(&data_url);
+
+        head.append_child(&link).expect("Failed to append link");
+    }
 }
 
 #[derive(PartialEq, Clone, Copy)]
