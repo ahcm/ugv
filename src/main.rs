@@ -194,18 +194,13 @@ struct GenomeViewer
     feature_search: String,
     search_results: Vec<(String, String, usize, usize)>, // (chr, name, start, end)
     show_search_results: bool,
-    show_amino_acids: bool,
     show_chromosome_panel: bool,
     // BAM support
     alignments: Option<bam::AlignmentData>,
     bam_path: String,
-    show_coverage: bool,
-    show_alignments: bool,
-    show_variants: bool,
     // TSV custom tracks
     tsv_data: Option<tsv::TsvData>,
     tsv_path: String,
-    show_tsv_track: bool,
     #[cfg(target_arch = "wasm32")]
     tsv_file_name: String,
     // Track configuration
@@ -295,18 +290,13 @@ impl GenomeViewer
             feature_search: String::new(),
             search_results: Vec::new(),
             show_search_results: false,
-            show_amino_acids: false,
             show_chromosome_panel: true,
             // BAM support
             alignments: None,
             bam_path: String::new(),
-            show_coverage: true,
-            show_alignments: true,
-            show_variants: false,
             // TSV custom tracks
             tsv_data: None,
             tsv_path: String::new(),
-            show_tsv_track: true,
             #[cfg(target_arch = "wasm32")]
             tsv_file_name: String::new(),
             // Track configuration - initialize default tracks
@@ -1239,10 +1229,27 @@ impl GenomeViewer
             viewport_start: self.viewport.start,
             viewport_end: self.viewport.end,
             show_chromosome_panel: self.show_chromosome_panel,
-            show_amino_acids: self.show_amino_acids,
-            show_coverage: self.show_coverage,
-            show_alignments: self.show_alignments,
-            show_variants: self.show_variants,
+            // Map track config visibility to old session format for backward compatibility
+            show_amino_acids: self
+                .track_configs
+                .get(&TrackType::AminoAcids)
+                .map(|c| c.visible)
+                .unwrap_or(false),
+            show_coverage: self
+                .track_configs
+                .get(&TrackType::Coverage)
+                .map(|c| c.visible)
+                .unwrap_or(true),
+            show_alignments: self
+                .track_configs
+                .get(&TrackType::Alignments)
+                .map(|c| c.visible)
+                .unwrap_or(true),
+            show_variants: self
+                .track_configs
+                .get(&TrackType::Variants)
+                .map(|c| c.visible)
+                .unwrap_or(false),
             chromosome_sort,
         }
     }
@@ -1257,10 +1264,24 @@ impl GenomeViewer
 
         // Restore UI state
         self.show_chromosome_panel = session.show_chromosome_panel;
-        self.show_amino_acids = session.show_amino_acids;
-        self.show_coverage = session.show_coverage;
-        self.show_alignments = session.show_alignments;
-        self.show_variants = session.show_variants;
+
+        // Map old session fields to track config visibility
+        if let Some(config) = self.track_configs.get_mut(&TrackType::AminoAcids)
+        {
+            config.visible = session.show_amino_acids;
+        }
+        if let Some(config) = self.track_configs.get_mut(&TrackType::Coverage)
+        {
+            config.visible = session.show_coverage;
+        }
+        if let Some(config) = self.track_configs.get_mut(&TrackType::Alignments)
+        {
+            config.visible = session.show_alignments;
+        }
+        if let Some(config) = self.track_configs.get_mut(&TrackType::Variants)
+        {
+            config.visible = session.show_variants;
+        }
 
         self.chromosome_sort = match session.chromosome_sort.as_str()
         {
@@ -1878,24 +1899,6 @@ impl eframe::App for GenomeViewer
 
                 ui.checkbox(&mut self.show_chromosome_panel, "Show chromosome list");
                 ui.checkbox(&mut self.show_track_panel, "Show track config");
-                ui.checkbox(&mut self.show_amino_acids, "Show amino acids (6 frames)");
-
-                // BAM display toggles
-                if self.alignments.is_some()
-                {
-                    ui.separator();
-                    ui.label("BAM Tracks:");
-                    ui.checkbox(&mut self.show_coverage, "Show coverage");
-                    ui.checkbox(&mut self.show_alignments, "Show reads");
-                    ui.checkbox(&mut self.show_variants, "Show variants");
-                }
-
-                // TSV track toggle
-                if self.tsv_data.is_some()
-                {
-                    ui.separator();
-                    ui.checkbox(&mut self.show_tsv_track, "Show custom TSV track");
-                }
             });
         });
 
@@ -2326,7 +2329,7 @@ impl eframe::App for GenomeViewer
                             }
                             TrackType::AminoAcids =>
                             {
-                                if self.show_amino_acids && self.viewport.width() < 5000
+                                if self.viewport.width() < 5000
                                 {
                                     y_offset = renderer::draw_amino_acid_frames(
                                         &painter,
