@@ -112,10 +112,41 @@ When amino acid frames are enabled, amino acids are color-coded by type:
 - Rust 1.70 or later
 
 ### Build from Source
+
+#### Native Build (Linux/macOS/Windows)
 ```bash
 git clone <repository-url>
 cd ugv
 cargo build --release
+```
+
+#### Cross-Compile for Windows (from Linux)
+```bash
+./build_windows.sh
+```
+
+Requirements:
+- `mingw-w64` toolchain
+  - Ubuntu/Debian: `sudo apt install mingw-w64`
+  - Fedora: `sudo dnf install mingw64-gcc`
+  - Arch: `sudo pacman -S mingw-w64-gcc`
+
+Output: `target/x86_64-pc-windows-gnu/release/ugv.exe`
+
+#### WebAssembly Build
+```bash
+./build_wasm.sh
+```
+
+This will:
+- Build the WASM binary
+- Generate JavaScript bindings
+- Create files ready for web deployment
+
+To test locally:
+```bash
+python3 -m http.server 8080
+# Open http://localhost:8080 in your browser
 ```
 
 ### Run
