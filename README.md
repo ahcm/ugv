@@ -14,8 +14,12 @@ A high-performance genome viewer built with Rust and egui, designed for interact
   - Gene feature tracks with color-coding by type
 
 ### Interactive Navigation
-- **Pan**: Click and drag to move along the chromosome
-- **Zoom**: Mouse scroll to zoom in/out (focus-aware zooming)
+- **Pan**:
+  - Click and drag to move along the chromosome
+  - Two-finger horizontal swipe (touchpad/trackpad) to scroll sideways
+- **Zoom**:
+  - Mouse scroll wheel to zoom in/out (focus-aware zooming)
+  - Two-finger vertical swipe (touchpad/trackpad) to zoom
 - **Multi-chromosome Support**: Browse all chromosomes in the genome
 
 ### Chromosome Management
@@ -106,9 +110,10 @@ chr1    source    gene    1000    5000    .    +    .    ID=gene1;Name=MyGene
 chr1    source    exon    1000    1500    .    +    .    Parent=gene1
 ```
 
-## Keyboard Shortcuts
-- **Mouse wheel**: Zoom in/out
-- **Click + drag**: Pan view
+## Navigation Controls
+- **Mouse wheel / Two-finger vertical swipe**: Zoom in/out (focus-aware)
+- **Click + drag**: Pan view horizontally
+- **Two-finger horizontal swipe**: Scroll genome sideways
 - **Enter** (in position search): Jump to position
 
 ## Architecture

@@ -1205,13 +1205,24 @@ impl eframe::App for GenomeViewer
 
             if let Some(hover_pos) = response.hover_pos()
             {
-                let scroll_delta = ui.input(|i| i.smooth_scroll_delta.y);
-                if scroll_delta != 0.0
+                // Vertical scroll (two-finger swipe up/down) for zoom
+                let scroll_delta_y = ui.input(|i| i.smooth_scroll_delta.y);
+                if scroll_delta_y != 0.0
                 {
                     let mouse_x = hover_pos.x - response.rect.left();
                     let relative_pos = mouse_x / available_size.x;
-                    let zoom_factor = if scroll_delta > 0.0 { 0.9 } else { 1.1 };
+                    let zoom_factor = if scroll_delta_y > 0.0 { 0.9 } else { 1.1 };
                     self.viewport.zoom(zoom_factor, relative_pos);
+                }
+
+                // Horizontal scroll (two-finger swipe left/right) for pan
+                let scroll_delta_x = ui.input(|i| i.smooth_scroll_delta.x);
+                if scroll_delta_x != 0.0
+                {
+                    let pixels_per_base =
+                        available_size.x / (self.viewport.end - self.viewport.start) as f32;
+                    let bases_moved = (scroll_delta_x / pixels_per_base) as i64;
+                    self.viewport.pan(bases_moved);
                 }
             }
 

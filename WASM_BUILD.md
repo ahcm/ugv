@@ -200,6 +200,7 @@ WASM-specific features already implemented:
 5. ✅ **Gzip Support**: Automatic decompression of `.gz` files
 6. ✅ **Visual Feedback**: Overlay when hovering with files
 7. ✅ **Loading Progress**: Real-time progress bar showing file loading and parsing status
+8. ✅ **Touch/Trackpad Gestures**: Two-finger swipe horizontal for panning, vertical for zooming
 
 ## Future Enhancements
 
