@@ -1626,241 +1626,244 @@ impl eframe::App for GenomeViewer
             });
         });
 
-        // File loading panel (left side)
+        // File loading panel (above tracks)
         if self.show_file_panel
         {
-            egui::SidePanel::left("file_panel")
-                .min_width(350.0)
+            egui::TopBottomPanel::top("file_panel")
+                .resizable(true)
+                .default_height(100.0)
                 .show(ctx, |ui| {
-                    ui.heading("Data Files");
+                    ui.horizontal(|ui| {
+                        ui.heading("Data Files");
+                    });
                     ui.separator();
 
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        // FASTA section
-                        ui.group(|ui| {
-                            ui.label(egui::RichText::new("FASTA Genome").strong());
-                            ui.add_space(5.0);
+                    egui::ScrollArea::horizontal().show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            // FASTA section
+                            ui.group(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.set_min_width(200.0);
+                                    ui.label(egui::RichText::new("📄 FASTA Genome").strong());
 
-                            #[cfg(not(target_arch = "wasm32"))]
-                            {
-                                if ui.button("📂 Open FASTA File...").clicked()
-                                {
-                                    if let Some(path) = rfd::FileDialog::new()
-                                        .add_filter("FASTA", &["fasta", "fa", "fna", "ffn", "faa", "frn"])
-                                        .add_filter(
-                                            "FASTA (gzipped)",
-                                            &[
-                                                "fasta.gz", "fa.gz", "fna.gz", "ffn.gz", "faa.gz", "frn.gz",
-                                                "gz",
-                                            ],
-                                        )
-                                        .add_filter("All files", &["*"])
-                                        .pick_file()
+                                    #[cfg(not(target_arch = "wasm32"))]
                                     {
-                                        self.fasta_path = path.display().to_string();
-                                        self.load_fasta();
+                                        if ui.button("Open...").clicked()
+                                        {
+                                            if let Some(path) = rfd::FileDialog::new()
+                                                .add_filter("FASTA", &["fasta", "fa", "fna", "ffn", "faa", "frn"])
+                                                .add_filter(
+                                                    "FASTA (gzipped)",
+                                                    &[
+                                                        "fasta.gz", "fa.gz", "fna.gz", "ffn.gz", "faa.gz", "frn.gz",
+                                                        "gz",
+                                                    ],
+                                                )
+                                                .add_filter("All files", &["*"])
+                                                .pick_file()
+                                            {
+                                                self.fasta_path = path.display().to_string();
+                                                self.load_fasta();
+                                            }
+                                        }
+
+                                        if !self.fasta_path.is_empty()
+                                        {
+                                            ui.label(
+                                                std::path::Path::new(&self.fasta_path)
+                                                    .file_name()
+                                                    .and_then(|n| n.to_str())
+                                                    .unwrap_or(&self.fasta_path)
+                                            );
+                                        }
                                     }
-                                }
 
-                                if !self.fasta_path.is_empty()
-                                {
-                                    ui.label(format!(
-                                        "📄 {}",
-                                        std::path::Path::new(&self.fasta_path)
-                                            .file_name()
-                                            .and_then(|n| n.to_str())
-                                            .unwrap_or(&self.fasta_path)
-                                    ));
-                                }
-                            }
-
-                            #[cfg(target_arch = "wasm32")]
-                            {
-                                ui.horizontal(|ui| {
-                                    if ui.button("Browse...").clicked()
+                                    #[cfg(target_arch = "wasm32")]
                                     {
-                                        self.open_file_picker(FilePickerType::Fasta);
-                                    }
-                                    ui.label("or drag & drop file or enter URL");
-                                });
+                                        if ui.button("Browse...").clicked()
+                                        {
+                                            self.open_file_picker(FilePickerType::Fasta);
+                                        }
 
-                                if !self.fasta_file_name.is_empty()
-                                {
-                                    ui.label(format!("📄 File: {}", self.fasta_file_name));
-                                }
+                                        if !self.fasta_file_name.is_empty()
+                                        {
+                                            ui.label(&self.fasta_file_name);
+                                        }
 
-                                ui.horizontal(|ui| {
-                                    ui.label("URL:");
-                                    ui.text_edit_singleline(&mut self.fasta_path);
-                                    if ui.button("Load").clicked()
-                                    {
-                                        self.load_fasta();
-                                    }
-                                });
-                            }
-                        });
-
-                        // GFF/GTF section
-                        ui.group(|ui| {
-                            ui.label(egui::RichText::new("GFF/GTF Annotations").strong());
-                            ui.add_space(5.0);
-
-                            #[cfg(not(target_arch = "wasm32"))]
-                            {
-                                if ui.button("📂 Open GFF/GTF File...").clicked()
-                                {
-                                    if let Some(path) = rfd::FileDialog::new()
-                                        .add_filter("GFF/GTF", &["gff", "gff3", "gtf"])
-                                        .add_filter("GFF/GTF (gzipped)", &["gff.gz", "gff3.gz", "gtf.gz", "gz"])
-                                        .add_filter("All files", &["*"])
-                                        .pick_file()
-                                    {
-                                        self.gff_path = path.display().to_string();
-                                        self.load_gff();
-                                    }
-                                }
-
-                                if !self.gff_path.is_empty()
-                                {
-                                    ui.label(format!(
-                                        "📄 {}",
-                                        std::path::Path::new(&self.gff_path)
-                                            .file_name()
-                                            .and_then(|n| n.to_str())
-                                            .unwrap_or(&self.gff_path)
-                                    ));
-                                }
-                            }
-
-                            #[cfg(target_arch = "wasm32")]
-                            {
-                                ui.horizontal(|ui| {
-                                    if ui.button("Browse...").clicked()
-                                    {
-                                        self.open_file_picker(FilePickerType::Gff);
-                                    }
-                                    ui.label("or drag & drop file or enter URL");
-                                });
-
-                                if !self.gff_file_name.is_empty()
-                                {
-                                    ui.label(format!("📄 File: {}", self.gff_file_name));
-                                }
-
-                                ui.horizontal(|ui| {
-                                    ui.label("URL:");
-                                    ui.text_edit_singleline(&mut self.gff_path);
-                                    if ui.button("Load").clicked()
-                                    {
-                                        self.load_gff();
+                                        ui.horizontal(|ui| {
+                                            ui.label("URL:");
+                                            ui.text_edit_singleline(&mut self.fasta_path);
+                                        });
+                                        if ui.button("Load").clicked()
+                                        {
+                                            self.load_fasta();
+                                        }
                                     }
                                 });
-                            }
-                        });
+                            });
 
-                        // BAM sequencing section
-                        ui.group(|ui| {
-                            ui.label(egui::RichText::new("BAM Sequencing Data").strong());
-                            ui.add_space(5.0);
+                            ui.add_space(10.0);
 
-                            #[cfg(not(target_arch = "wasm32"))]
-                            {
-                                if ui.button("📂 Open BAM File...").clicked()
-                                {
-                                    if let Some(path) = rfd::FileDialog::new()
-                                        .add_filter("BAM", &["bam"])
-                                        .add_filter("All files", &["*"])
-                                        .pick_file()
+                            // GFF/GTF section
+                            ui.group(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.set_min_width(200.0);
+                                    ui.label(egui::RichText::new("📄 GFF/GTF Annotations").strong());
+
+                                    #[cfg(not(target_arch = "wasm32"))]
                                     {
-                                        self.bam_path = path.display().to_string();
-                                        self.load_bam();
+                                        if ui.button("Open...").clicked()
+                                        {
+                                            if let Some(path) = rfd::FileDialog::new()
+                                                .add_filter("GFF/GTF", &["gff", "gff3", "gtf"])
+                                                .add_filter("GFF/GTF (gzipped)", &["gff.gz", "gff3.gz", "gtf.gz", "gz"])
+                                                .add_filter("All files", &["*"])
+                                                .pick_file()
+                                            {
+                                                self.gff_path = path.display().to_string();
+                                                self.load_gff();
+                                            }
+                                        }
+
+                                        if !self.gff_path.is_empty()
+                                        {
+                                            ui.label(
+                                                std::path::Path::new(&self.gff_path)
+                                                    .file_name()
+                                                    .and_then(|n| n.to_str())
+                                                    .unwrap_or(&self.gff_path)
+                                            );
+                                        }
                                     }
-                                }
 
-                                if !self.bam_path.is_empty()
-                                {
-                                    ui.label(format!(
-                                        "📊 {}",
-                                        std::path::Path::new(&self.bam_path)
-                                            .file_name()
-                                            .and_then(|n| n.to_str())
-                                            .unwrap_or(&self.bam_path)
-                                    ));
-                                }
-                            }
-
-                            #[cfg(target_arch = "wasm32")]
-                            {
-                                ui.horizontal(|ui| {
-                                    if ui.button("Browse...").clicked()
+                                    #[cfg(target_arch = "wasm32")]
                                     {
-                                        self.open_file_picker(FilePickerType::Bam);
+                                        if ui.button("Browse...").clicked()
+                                        {
+                                            self.open_file_picker(FilePickerType::Gff);
+                                        }
+
+                                        if !self.gff_file_name.is_empty()
+                                        {
+                                            ui.label(&self.gff_file_name);
+                                        }
+
+                                        ui.horizontal(|ui| {
+                                            ui.label("URL:");
+                                            ui.text_edit_singleline(&mut self.gff_path);
+                                        });
+                                        if ui.button("Load").clicked()
+                                        {
+                                            self.load_gff();
+                                        }
                                     }
-                                    ui.label("or drag & drop file or enter URL");
                                 });
+                            });
 
-                                if !self.bam_file_name.is_empty()
-                                {
-                                    ui.label(format!("📊 File: {}", self.bam_file_name));
-                                }
+                            ui.add_space(10.0);
 
-                                ui.horizontal(|ui| {
-                                    ui.label("URL:");
-                                    ui.text_edit_singleline(&mut self.bam_path);
-                                    if ui.button("Load").clicked()
+                            // BAM sequencing section
+                            ui.group(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.set_min_width(200.0);
+                                    ui.label(egui::RichText::new("📊 BAM Sequencing").strong());
+
+                                    #[cfg(not(target_arch = "wasm32"))]
                                     {
-                                        self.load_bam();
+                                        if ui.button("Open...").clicked()
+                                        {
+                                            if let Some(path) = rfd::FileDialog::new()
+                                                .add_filter("BAM", &["bam"])
+                                                .add_filter("All files", &["*"])
+                                                .pick_file()
+                                            {
+                                                self.bam_path = path.display().to_string();
+                                                self.load_bam();
+                                            }
+                                        }
+
+                                        if !self.bam_path.is_empty()
+                                        {
+                                            ui.label(
+                                                std::path::Path::new(&self.bam_path)
+                                                    .file_name()
+                                                    .and_then(|n| n.to_str())
+                                                    .unwrap_or(&self.bam_path)
+                                            );
+                                        }
+                                    }
+
+                                    #[cfg(target_arch = "wasm32")]
+                                    {
+                                        if ui.button("Browse...").clicked()
+                                        {
+                                            self.open_file_picker(FilePickerType::Bam);
+                                        }
+
+                                        if !self.bam_file_name.is_empty()
+                                        {
+                                            ui.label(&self.bam_file_name);
+                                        }
+
+                                        ui.horizontal(|ui| {
+                                            ui.label("URL:");
+                                            ui.text_edit_singleline(&mut self.bam_path);
+                                        });
+                                        if ui.button("Load").clicked()
+                                        {
+                                            self.load_bam();
+                                        }
                                     }
                                 });
-                            }
-                        });
+                            });
 
-                        // TSV custom track section
-                        ui.group(|ui| {
-                            ui.label(egui::RichText::new("TSV Custom Track").strong());
-                            ui.add_space(5.0);
+                            ui.add_space(10.0);
 
-                            #[cfg(not(target_arch = "wasm32"))]
-                            {
-                                if ui.button("📂 Open TSV File...").clicked()
-                                {
-                                    if let Some(path) = rfd::FileDialog::new()
-                                        .add_filter("TSV", &["tsv", "txt"])
-                                        .add_filter("All files", &["*"])
-                                        .pick_file()
+                            // TSV custom track section
+                            ui.group(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.set_min_width(200.0);
+                                    ui.label(egui::RichText::new("📈 TSV Custom Track").strong());
+
+                                    #[cfg(not(target_arch = "wasm32"))]
                                     {
-                                        self.tsv_path = path.display().to_string();
-                                        self.load_tsv();
+                                        if ui.button("Open...").clicked()
+                                        {
+                                            if let Some(path) = rfd::FileDialog::new()
+                                                .add_filter("TSV", &["tsv", "txt"])
+                                                .add_filter("All files", &["*"])
+                                                .pick_file()
+                                            {
+                                                self.tsv_path = path.display().to_string();
+                                                self.load_tsv();
+                                            }
+                                        }
+
+                                        if !self.tsv_path.is_empty()
+                                        {
+                                            ui.label(
+                                                std::path::Path::new(&self.tsv_path)
+                                                    .file_name()
+                                                    .and_then(|n| n.to_str())
+                                                    .unwrap_or(&self.tsv_path)
+                                            );
+                                        }
                                     }
-                                }
 
-                                if !self.tsv_path.is_empty()
-                                {
-                                    ui.label(format!(
-                                        "📈 {}",
-                                        std::path::Path::new(&self.tsv_path)
-                                            .file_name()
-                                            .and_then(|n| n.to_str())
-                                            .unwrap_or(&self.tsv_path)
-                                    ));
-                                }
-                            }
-
-                            #[cfg(target_arch = "wasm32")]
-                            {
-                                ui.horizontal(|ui| {
-                                    if ui.button("Browse...").clicked()
+                                    #[cfg(target_arch = "wasm32")]
                                     {
-                                        self.open_file_picker(FilePickerType::Tsv);
+                                        if ui.button("Browse...").clicked()
+                                        {
+                                            self.open_file_picker(FilePickerType::Tsv);
+                                        }
+
+                                        if !self.tsv_file_name.is_empty()
+                                        {
+                                            ui.label(&self.tsv_file_name);
+                                        }
                                     }
-                                    ui.label("or drag & drop file");
                                 });
-
-                                if !self.tsv_file_name.is_empty()
-                                {
-                                    ui.label(format!("📈 File: {}", self.tsv_file_name));
-                                }
-                            }
+                            });
                         });
                     });
                 });
