@@ -4,6 +4,7 @@ mod interval_tree;
 mod renderer;
 mod viewport;
 mod file_loader;
+mod translation;
 
 use anyhow::Result;
 use eframe::egui;
@@ -83,6 +84,7 @@ struct GenomeViewer
     feature_search: String,
     search_results: Vec<(String, String, usize, usize)>, // (chr, name, start, end)
     show_search_results: bool,
+    show_amino_acids: bool,
     #[cfg(target_arch = "wasm32")]
     genome_promise: GenomePromise,
     #[cfg(target_arch = "wasm32")]
@@ -155,6 +157,7 @@ impl GenomeViewer
             feature_search: String::new(),
             search_results: Vec::new(),
             show_search_results: false,
+            show_amino_acids: false,
             #[cfg(target_arch = "wasm32")]
             genome_promise: egui::mutex::Mutex::new(None),
             #[cfg(target_arch = "wasm32")]
@@ -967,6 +970,10 @@ impl eframe::App for GenomeViewer
                         self.show_search_results = !self.show_search_results;
                     }
                 }
+
+                ui.separator();
+
+                ui.checkbox(&mut self.show_amino_acids, "Show amino acids (6 frames)");
             });
         });
 
@@ -1240,6 +1247,7 @@ impl eframe::App for GenomeViewer
                         &self.features,
                         self.interval_tree.as_ref(),
                         chr_name,
+                        self.show_amino_acids,
                     );
                 }
             }

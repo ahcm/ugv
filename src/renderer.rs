@@ -1,13 +1,15 @@
 use crate::fasta::Chromosome;
 use crate::gff::Feature;
 use crate::interval_tree::IntervalTree;
+use crate::translation;
 use crate::viewport::Viewport;
-use egui::{Color32, Painter, Pos2, Rect, Stroke, Vec2};
+use egui::{Color32, FontId, Painter, Pos2, Rect, Stroke, Vec2};
 
 const RULER_HEIGHT: f32 = 30.0;
 const SEQUENCE_HEIGHT: f32 = 40.0;
 const GC_CONTENT_HEIGHT: f32 = 60.0;
 const FEATURE_TRACK_HEIGHT: f32 = 30.0;
+const AMINO_ACID_TRACK_HEIGHT: f32 = 20.0;
 const TRACK_SPACING: f32 = 10.0;
 
 pub fn render_genome(
@@ -18,6 +20,7 @@ pub fn render_genome(
     features: &[Feature],
     interval_tree: Option<&IntervalTree>,
     chr_name: &str,
+    show_amino_acids: bool,
 )
 {
     let mut y_offset = rect.top();
@@ -34,6 +37,13 @@ pub fn render_genome(
     if viewport.width() < 1000
     {
         y_offset = draw_sequence(painter, rect, chromosome, viewport, y_offset);
+        y_offset += TRACK_SPACING;
+    }
+
+    // Draw amino acid frames (if enabled and zoomed in enough)
+    if show_amino_acids && viewport.width() < 5000
+    {
+        y_offset = draw_amino_acid_frames(painter, rect, chromosome, viewport, y_offset);
         y_offset += TRACK_SPACING;
     }
 
@@ -225,6 +235,183 @@ fn draw_sequence(
     }
 
     seq_rect.bottom()
+}
+
+fn draw_amino_acid_frames(
+    painter: &Painter,
+    rect: Rect,
+    chromosome: &Chromosome,
+    viewport: &Viewport,
+    y_offset: f32,
+) -> f32
+{
+    // Get the visible sequence
+    let start = viewport.start;
+    let end = viewport.end.min(chromosome.length);
+
+    if start >= end {
+        return y_offset;
+    }
+
+    let sequence = &chromosome.sequence[start..end];
+    let sequence_length = sequence.len();
+
+    // Translate all 6 frames
+    let (forward_frames, reverse_frames) = translation::translate_six_frames(sequence);
+
+    let total_height = AMINO_ACID_TRACK_HEIGHT * 6.0 + TRACK_SPACING * 5.0;
+    let frame_rect = Rect::from_min_size(
+        Pos2::new(rect.left(), y_offset),
+        Vec2::new(rect.width(), total_height),
+    );
+
+    // Background
+    painter.rect_filled(frame_rect, 0.0, Color32::from_gray(250));
+
+    let mut current_y = y_offset;
+
+    // Draw forward frames (top 3)
+    for (frame_idx, amino_acids) in forward_frames.iter().enumerate() {
+        draw_single_frame(
+            painter,
+            rect,
+            amino_acids,
+            viewport,
+            start,
+            sequence_length,
+            frame_idx,
+            current_y,
+            true, // forward strand
+        );
+        current_y += AMINO_ACID_TRACK_HEIGHT;
+    }
+
+    // Draw reverse frames (bottom 3)
+    for (frame_idx, amino_acids) in reverse_frames.iter().enumerate() {
+        draw_single_frame(
+            painter,
+            rect,
+            amino_acids,
+            viewport,
+            start,
+            sequence_length,
+            frame_idx,
+            current_y,
+            false, // reverse strand
+        );
+        current_y += AMINO_ACID_TRACK_HEIGHT;
+    }
+
+    frame_rect.bottom()
+}
+
+fn draw_single_frame(
+    painter: &Painter,
+    rect: Rect,
+    amino_acids: &[char],
+    viewport: &Viewport,
+    sequence_start: usize,
+    sequence_length: usize,
+    frame: usize,
+    y_offset: f32,
+    is_forward: bool,
+)
+{
+    let track_rect = Rect::from_min_size(
+        Pos2::new(rect.left(), y_offset),
+        Vec2::new(rect.width(), AMINO_ACID_TRACK_HEIGHT),
+    );
+
+    // Draw background
+    let bg_color = if is_forward {
+        Color32::from_rgb(240, 248, 255) // Light blue for forward
+    } else {
+        Color32::from_rgb(255, 248, 240) // Light orange for reverse
+    };
+    painter.rect_filled(track_rect, 0.0, bg_color);
+
+    // Draw border
+    painter.rect_stroke(track_rect, 0.0, Stroke::new(1.0, Color32::from_gray(200)));
+
+    // Draw frame label
+    let strand_symbol = if is_forward { "+" } else { "-" };
+    let frame_label = format!("{}{}", strand_symbol, frame + 1);
+    painter.text(
+        Pos2::new(rect.left() + 5.0, y_offset + AMINO_ACID_TRACK_HEIGHT / 2.0),
+        egui::Align2::LEFT_CENTER,
+        frame_label,
+        FontId::monospace(10.0),
+        Color32::from_gray(100),
+    );
+
+    // Draw amino acids
+    let pixels_per_base = rect.width() / viewport.width() as f32;
+    let char_width = pixels_per_base * 3.0; // Each amino acid represents 3 bases (codon)
+
+    // Only draw if characters are visible
+    if char_width > 6.0 {
+        for (aa_idx, &aa) in amino_acids.iter().enumerate() {
+            let codon_pos = if is_forward {
+                sequence_start + frame + (aa_idx * 3)
+            } else {
+                // For reverse strand, calculate the position
+                sequence_start + sequence_length.saturating_sub(frame + (aa_idx * 3) + 3)
+            };
+
+            if codon_pos >= viewport.start && codon_pos < viewport.end {
+                let x = viewport.position_to_screen(codon_pos, rect.width()) + rect.left();
+
+                // Color based on amino acid type
+                let color = get_amino_acid_color(aa);
+
+                // Draw background for the amino acid
+                if char_width > 10.0 {
+                    painter.rect_filled(
+                        Rect::from_min_size(
+                            Pos2::new(x, track_rect.top()),
+                            Vec2::new(char_width.min(rect.right() - x), AMINO_ACID_TRACK_HEIGHT),
+                        ),
+                        0.0,
+                        color.linear_multiply(0.3),
+                    );
+                }
+
+                // Draw the amino acid letter if there's enough space
+                if char_width > 12.0 {
+                    painter.text(
+                        Pos2::new(x + char_width / 2.0, y_offset + AMINO_ACID_TRACK_HEIGHT / 2.0),
+                        egui::Align2::CENTER_CENTER,
+                        aa.to_string(),
+                        FontId::monospace(10.0),
+                        color,
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn get_amino_acid_color(aa: char) -> Color32 {
+    match aa {
+        // Hydrophobic (aliphatic)
+        'A' | 'V' | 'I' | 'L' | 'M' => Color32::from_rgb(0, 150, 0),
+        // Aromatic
+        'F' | 'W' | 'Y' => Color32::from_rgb(100, 50, 150),
+        // Polar
+        'S' | 'T' | 'N' | 'Q' => Color32::from_rgb(0, 100, 150),
+        // Positively charged
+        'K' | 'R' | 'H' => Color32::from_rgb(0, 0, 200),
+        // Negatively charged
+        'D' | 'E' => Color32::from_rgb(200, 0, 0),
+        // Special
+        'C' => Color32::from_rgb(200, 200, 0), // Cysteine (yellow)
+        'G' => Color32::from_rgb(150, 150, 150), // Glycine (gray)
+        'P' => Color32::from_rgb(200, 100, 0), // Proline (orange)
+        // Stop codon
+        '*' => Color32::from_rgb(200, 0, 0),
+        // Unknown
+        _ => Color32::GRAY,
+    }
 }
 
 fn draw_features(

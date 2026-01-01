@@ -11,6 +11,7 @@ A high-performance genome viewer built with Rust and egui, designed for interact
   - Position ruler with adaptive scaling
   - GC content plot
   - DNA sequence view (when zoomed in)
+  - **Amino acid translation** in all 6 reading frames (3 forward + 3 reverse)
   - Gene feature tracks with color-coding by type
 
 ### Interactive Navigation
@@ -54,6 +55,22 @@ A high-performance genome viewer built with Rust and egui, designed for interact
 - **UTR**: Yellow
 - **Intron**: Gray
 
+### Amino Acid Color Coding
+When amino acid frames are enabled, amino acids are color-coded by type:
+- **Hydrophobic (A, V, I, L, M)**: Green
+- **Aromatic (F, W, Y)**: Purple
+- **Polar (S, T, N, Q)**: Teal
+- **Positively charged (K, R, H)**: Blue
+- **Negatively charged (D, E)**: Red
+- **Cysteine (C)**: Yellow
+- **Glycine (G)**: Gray
+- **Proline (P)**: Orange
+- **Stop codon (*)**: Red
+
+#### Reading Frames
+- **Forward frames** (+1, +2, +3): Light blue background
+- **Reverse frames** (-1, -2, -3): Light orange background
+
 ## Installation
 
 ### Prerequisites
@@ -92,6 +109,12 @@ cargo run --release
    - **Find features**: Enter a gene name in "Find feature:" and click Search
    - Browse results and click "Jump" to navigate to any feature
 
+5. **View Amino Acid Translation**:
+   - Enable the "Show amino acids (6 frames)" checkbox in the search panel
+   - Zoom in to view level (< 5000 bases) to see the amino acid translations
+   - All 6 reading frames are displayed (3 forward + 3 reverse)
+   - Amino acids are color-coded by biochemical properties
+
 ## File Format Support
 
 ### FASTA Files
@@ -123,7 +146,8 @@ chr1    source    exon    1000    1500    .    +    .    Parent=gene1
 - **gff.rs**: GFF3/GTF annotation parser
 - **interval_tree.rs**: Efficient feature range queries
 - **viewport.rs**: View management (pan, zoom, coordinate mapping)
-- **renderer.rs**: Multi-track genome visualization
+- **translation.rs**: DNA to protein translation (standard genetic code, 6 frames)
+- **renderer.rs**: Multi-track genome visualization with amino acid display
 
 ### Performance Optimizations
 - Binary search for interval queries
