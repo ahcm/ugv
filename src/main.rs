@@ -2146,7 +2146,7 @@ impl eframe::App for GenomeViewer
                                         ui.label("Max reads to display:");
                                         ui.horizontal(|ui| {
                                             ui.add(
-                                                egui::Slider::new(&mut self.max_reads_display, 100..=10000)
+                                                egui::Slider::new(&mut self.max_reads_display, 100..=50000)
                                                     .logarithmic(true)
                                                     .text("reads"),
                                             );
