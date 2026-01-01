@@ -139,8 +139,7 @@ struct GenomeViewer
     track_configs: std::collections::HashMap<TrackType, TrackConfig>,
     track_order: Vec<TrackType>,
     show_track_panel: bool,
-    // Session restoration
-    restoring_session: bool,
+    // Session restoration (WASM only - for async file loading)
     #[cfg(target_arch = "wasm32")]
     session_viewport: Option<(Option<String>, usize, usize)>, // (chromosome, start, end)
     #[cfg(target_arch = "wasm32")]
@@ -240,8 +239,7 @@ impl GenomeViewer
             track_configs: Self::default_track_configs(),
             track_order: Self::default_track_order(),
             show_track_panel: false,
-            // Session restoration
-            restoring_session: false,
+            // Session restoration (WASM only)
             #[cfg(target_arch = "wasm32")]
             session_viewport: None,
             #[cfg(target_arch = "wasm32")]
@@ -522,17 +520,12 @@ impl GenomeViewer
             Ok(genome) =>
             {
                 self.status_message = format!("Loaded {} chromosomes", genome.chromosomes.len());
-
-                // Only set viewport if not restoring from session
-                if !self.restoring_session
+                if let Some(first_chr) = genome.chromosomes.keys().next()
                 {
-                    if let Some(first_chr) = genome.chromosomes.keys().next()
+                    self.selected_chromosome = Some(first_chr.clone());
+                    if let Some(chr) = genome.chromosomes.get(first_chr)
                     {
-                        self.selected_chromosome = Some(first_chr.clone());
-                        if let Some(chr) = genome.chromosomes.get(first_chr)
-                        {
-                            self.viewport = viewport::Viewport::new(0, chr.length);
-                        }
+                        self.viewport = viewport::Viewport::new(0, chr.length);
                     }
                 }
                 self.genome = Some(genome);
@@ -614,26 +607,22 @@ impl GenomeViewer
                         self.status_message =
                             format!("Loaded {} chromosomes", genome.chromosomes.len());
 
-                        // Check if we're restoring from a session
+                        // Set to first chromosome
+                        if let Some(first_chr) = genome.chromosomes.keys().next()
+                        {
+                            self.selected_chromosome = Some(first_chr.clone());
+                            if let Some(chr) = genome.chromosomes.get(first_chr)
+                            {
+                                self.viewport = viewport::Viewport::new(0, chr.length);
+                            }
+                        }
+
+                        // If we're restoring from a session, override with saved viewport
                         if let Some((saved_chr, saved_start, saved_end)) = self.session_viewport.take()
                         {
-                            // Restoring from session - use saved viewport
                             self.selected_chromosome = saved_chr;
                             self.viewport.start = saved_start;
                             self.viewport.end = saved_end;
-                            self.restoring_session = false;
-                        }
-                        else
-                        {
-                            // Normal load - set to first chromosome
-                            if let Some(first_chr) = genome.chromosomes.keys().next()
-                            {
-                                self.selected_chromosome = Some(first_chr.clone());
-                                if let Some(chr) = genome.chromosomes.get(first_chr)
-                                {
-                                    self.viewport = viewport::Viewport::new(0, chr.length);
-                                }
-                            }
                         }
                         self.genome = Some(genome.clone());
                     }
@@ -1205,21 +1194,17 @@ impl GenomeViewer
             _ => ChromosomeSort::Natural,
         };
 
-        // Mark that we're restoring from a session
-        self.restoring_session = true;
-
-        // Save viewport and chromosome to restore after file loads
-        let saved_chromosome = session.selected_chromosome.clone();
-        let saved_viewport_start = session.viewport_start;
-        let saved_viewport_end = session.viewport_end;
-
         // For WASM, save viewport to restore after async load completes
         #[cfg(target_arch = "wasm32")]
         {
-            self.session_viewport = Some((saved_chromosome.clone(), saved_viewport_start, saved_viewport_end));
+            self.session_viewport = Some((
+                session.selected_chromosome.clone(),
+                session.viewport_start,
+                session.viewport_end,
+            ));
         }
 
-        // Load files
+        // Load all files first
         if !self.fasta_path.is_empty()
         {
             self.load_fasta();
@@ -1235,14 +1220,13 @@ impl GenomeViewer
             self.load_bam();
         }
 
-        // Restore viewport and selected chromosome (after file loads that might have reset it)
+        // Now restore viewport and chromosome (after all files loaded)
         // For native, this happens immediately. For WASM, it happens in check_genome_promise
         #[cfg(not(target_arch = "wasm32"))]
         {
-            self.selected_chromosome = saved_chromosome;
-            self.viewport.start = saved_viewport_start;
-            self.viewport.end = saved_viewport_end;
-            self.restoring_session = false;
+            self.selected_chromosome = session.selected_chromosome;
+            self.viewport.start = session.viewport_start;
+            self.viewport.end = session.viewport_end;
         }
     }
 
