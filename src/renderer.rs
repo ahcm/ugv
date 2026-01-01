@@ -3,6 +3,7 @@ use crate::gff::Feature;
 use crate::interval_tree::IntervalTree;
 use crate::translation;
 use crate::viewport::Viewport;
+use crate::bam::{AlignmentTrack, AlignmentRecord, VariantType};
 use egui::{Color32, FontId, Painter, Pos2, Rect, Stroke, Vec2};
 
 const RULER_HEIGHT: f32 = 30.0;
@@ -11,6 +12,12 @@ const GC_CONTENT_HEIGHT: f32 = 60.0;
 const FEATURE_TRACK_HEIGHT: f32 = 30.0;
 const AMINO_ACID_TRACK_HEIGHT: f32 = 20.0;
 const TRACK_SPACING: f32 = 10.0;
+
+// BAM track constants
+const COVERAGE_TRACK_HEIGHT: f32 = 80.0;
+const ALIGNMENT_ROW_HEIGHT: f32 = 12.0;
+const MAX_ALIGNMENT_ROWS: usize = 50;
+const VARIANT_TRACK_HEIGHT: f32 = 30.0;
 
 pub fn render_genome(
     painter: &Painter,
@@ -583,4 +590,293 @@ fn format_position(pos: usize) -> String
     {
         pos.to_string()
     }
+}
+
+// ============================================================================
+// BAM TRACK RENDERING
+// ============================================================================
+
+/// Draw coverage histogram track
+pub fn draw_coverage_track(
+    painter: &Painter,
+    rect: Rect,
+    track: &AlignmentTrack,
+    viewport: &Viewport,
+    y_offset: f32,
+) -> f32
+{
+    let track_rect = Rect::from_min_size(
+        Pos2::new(rect.left(), y_offset),
+        Vec2::new(rect.width(), COVERAGE_TRACK_HEIGHT),
+    );
+
+    // Background
+    painter.rect_filled(track_rect, 0.0, Color32::from_gray(250));
+
+    // Get coverage data for viewport
+    let bin_size = 100; // matches the bin size used in coverage calculation
+    let start_bin = viewport.start / bin_size;
+    let end_bin = (viewport.end / bin_size).min(track.coverage.len());
+
+    if start_bin >= track.coverage.len() {
+        return track_rect.bottom() + TRACK_SPACING;
+    }
+
+    let coverage_slice = &track.coverage[start_bin..end_bin];
+
+    if coverage_slice.is_empty() {
+        return track_rect.bottom() + TRACK_SPACING;
+    }
+
+    // Find max depth for scaling
+    let max_depth = coverage_slice
+        .iter()
+        .map(|p| p.depth)
+        .max()
+        .unwrap_or(1)
+        .max(1);
+
+    // Draw histogram bars
+    for point in coverage_slice {
+        if point.position < viewport.start || point.position >= viewport.end {
+            continue;
+        }
+
+        let x = viewport.position_to_screen(point.position, rect.width()) + rect.left();
+        let bar_width = (rect.width() / viewport.width() as f32 * bin_size as f32).max(1.0);
+        let height = (point.depth as f32 / max_depth as f32) * (COVERAGE_TRACK_HEIGHT - 20.0);
+        let y = track_rect.bottom() - height - 5.0;
+
+        let color = Color32::from_rgb(100, 150, 200);
+        painter.rect_filled(
+            Rect::from_min_size(Pos2::new(x, y), Vec2::new(bar_width, height)),
+            0.0,
+            color,
+        );
+    }
+
+    // Draw label and max depth
+    let label_text = format!("Coverage (max: {})", max_depth);
+    painter.text(
+        Pos2::new(rect.left() + 5.0, y_offset + 5.0),
+        egui::Align2::LEFT_TOP,
+        label_text,
+        FontId::proportional(12.0),
+        Color32::BLACK,
+    );
+
+    track_rect.bottom() + TRACK_SPACING
+}
+
+/// Draw alignment reads track
+pub fn draw_alignments(
+    painter: &Painter,
+    rect: Rect,
+    track: &AlignmentTrack,
+    viewport: &Viewport,
+    y_offset: f32,
+) -> f32
+{
+    // Filter reads in viewport
+    let visible_reads: Vec<&AlignmentRecord> = track
+        .records
+        .iter()
+        .filter(|r| r.reference_end > viewport.start && r.reference_start < viewport.end)
+        .collect();
+
+    // If too many reads, show message instead
+    if visible_reads.len() > 1000 {
+        painter.text(
+            Pos2::new(rect.left() + 5.0, y_offset + 5.0),
+            egui::Align2::LEFT_TOP,
+            format!("Too many reads ({}) - zoom in to view", visible_reads.len()),
+            FontId::proportional(12.0),
+            Color32::DARK_GRAY,
+        );
+        return y_offset + 30.0 + TRACK_SPACING;
+    }
+
+    if visible_reads.is_empty() {
+        return y_offset;
+    }
+
+    // Stack alignments
+    let rows = crate::bam::stack_alignments(
+        &track.records,
+        viewport.start,
+        viewport.end,
+        MAX_ALIGNMENT_ROWS,
+    );
+
+    let total_height = (rows.len() as f32 * (ALIGNMENT_ROW_HEIGHT + 2.0)).min(
+        MAX_ALIGNMENT_ROWS as f32 * (ALIGNMENT_ROW_HEIGHT + 2.0),
+    );
+
+    // Background
+    let track_rect = Rect::from_min_size(
+        Pos2::new(rect.left(), y_offset),
+        Vec2::new(rect.width(), total_height + 20.0),
+    );
+    painter.rect_filled(track_rect, 0.0, Color32::from_gray(245));
+
+    // Draw label
+    painter.text(
+        Pos2::new(rect.left() + 5.0, y_offset + 5.0),
+        egui::Align2::LEFT_TOP,
+        format!("Alignments ({} reads)", visible_reads.len()),
+        FontId::proportional(12.0),
+        Color32::BLACK,
+    );
+
+    // Draw reads
+    for (row_idx, row) in rows.iter().enumerate() {
+        let row_y = y_offset + 20.0 + (row_idx as f32 * (ALIGNMENT_ROW_HEIGHT + 2.0));
+
+        for &read_idx in row {
+            if read_idx < track.records.len() {
+                let read = &track.records[read_idx];
+                draw_single_read(painter, &rect, read, viewport, row_y);
+            }
+        }
+    }
+
+    track_rect.bottom() + TRACK_SPACING
+}
+
+/// Draw a single alignment read
+fn draw_single_read(
+    painter: &Painter,
+    rect: &Rect,
+    read: &AlignmentRecord,
+    viewport: &Viewport,
+    y: f32,
+)
+{
+    let start_x = viewport.position_to_screen(read.reference_start, rect.width()) + rect.left();
+    let end_x = viewport.position_to_screen(read.reference_end, rect.width()) + rect.left();
+    let width = (end_x - start_x).max(2.0);
+
+    // Color by strand
+    let base_color = match read.strand {
+        crate::gff::Strand::Forward => Color32::from_rgb(100, 150, 200),
+        crate::gff::Strand::Reverse => Color32::from_rgb(200, 100, 100),
+        _ => Color32::GRAY,
+    };
+
+    // Adjust alpha by mapping quality
+    let alpha = ((read.mapping_quality as f32 / 60.0) * 200.0 + 55.0).min(255.0) as u8;
+    let color = Color32::from_rgba_premultiplied(
+        base_color.r(),
+        base_color.g(),
+        base_color.b(),
+        alpha,
+    );
+
+    let read_rect = Rect::from_min_size(
+        Pos2::new(start_x, y),
+        Vec2::new(width, ALIGNMENT_ROW_HEIGHT),
+    );
+
+    painter.rect_filled(read_rect, 1.0, color);
+    painter.rect_stroke(read_rect, 1.0, Stroke::new(0.5, Color32::from_gray(100)));
+}
+
+/// Draw variant summary track
+pub fn draw_variant_summary(
+    painter: &Painter,
+    rect: Rect,
+    track: &AlignmentTrack,
+    viewport: &Viewport,
+    y_offset: f32,
+) -> f32
+{
+    let track_rect = Rect::from_min_size(
+        Pos2::new(rect.left(), y_offset),
+        Vec2::new(rect.width(), VARIANT_TRACK_HEIGHT),
+    );
+
+    // Background
+    painter.rect_filled(track_rect, 0.0, Color32::from_gray(250));
+
+    // Collect variant counts by position
+    let mut variant_counts: std::collections::HashMap<usize, (u32, u32, u32)> =
+        std::collections::HashMap::new();
+
+    for record in &track.records {
+        if record.reference_start > viewport.end || record.reference_end < viewport.start {
+            continue;
+        }
+
+        for variant in &record.variants {
+            if variant.position >= viewport.start && variant.position < viewport.end {
+                let counts = variant_counts.entry(variant.position).or_insert((0, 0, 0));
+                match variant.variant_type {
+                    VariantType::SNP => counts.0 += 1,
+                    VariantType::Insertion => counts.1 += 1,
+                    VariantType::Deletion => counts.2 += 1,
+                }
+            }
+        }
+    }
+
+    // Draw label
+    painter.text(
+        Pos2::new(rect.left() + 5.0, y_offset + 5.0),
+        egui::Align2::LEFT_TOP,
+        format!("Variants ({} positions)", variant_counts.len()),
+        FontId::proportional(12.0),
+        Color32::BLACK,
+    );
+
+    // Draw variant markers
+    for (pos, (snps, ins, del)) in variant_counts {
+        let x = viewport.position_to_screen(pos, rect.width()) + rect.left();
+        let total = snps + ins + del;
+        let height = ((total as f32 / 10.0).min(1.0) * (VARIANT_TRACK_HEIGHT - 15.0))
+            .max(2.0);
+        let y_bottom = track_rect.bottom() - 5.0;
+
+        // Draw stacked bars
+        let mut current_y = y_bottom;
+
+        if del > 0 {
+            let del_height = (del as f32 / total as f32) * height;
+            painter.rect_filled(
+                Rect::from_min_size(
+                    Pos2::new(x - 1.0, current_y - del_height),
+                    Vec2::new(2.0, del_height),
+                ),
+                0.0,
+                Color32::BLACK,
+            );
+            current_y -= del_height;
+        }
+
+        if ins > 0 {
+            let ins_height = (ins as f32 / total as f32) * height;
+            painter.rect_filled(
+                Rect::from_min_size(
+                    Pos2::new(x - 1.0, current_y - ins_height),
+                    Vec2::new(2.0, ins_height),
+                ),
+                0.0,
+                Color32::from_rgb(150, 50, 200),
+            );
+            current_y -= ins_height;
+        }
+
+        if snps > 0 {
+            let snp_height = (snps as f32 / total as f32) * height;
+            painter.rect_filled(
+                Rect::from_min_size(
+                    Pos2::new(x - 1.0, current_y - snp_height),
+                    Vec2::new(2.0, snp_height),
+                ),
+                0.0,
+                Color32::from_rgb(200, 50, 50),
+            );
+        }
+    }
+
+    track_rect.bottom() + TRACK_SPACING
 }

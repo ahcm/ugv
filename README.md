@@ -7,12 +7,17 @@ A high-performance genome viewer built with Rust and egui, designed for interact
 ### Genome Visualization
 - **FASTA Support**: Load genome sequences in FASTA format (plain or gzipped)
 - **GFF/GTF Annotations**: Display gene features from GFF3/GTF files (plain or gzipped)
+- **BAM Sequencing Data**: Display aligned sequencing reads from BAM files
 - **Multi-track Display**:
   - Position ruler with adaptive scaling
   - GC content plot
   - DNA sequence view (when zoomed in)
   - **Amino acid translation** in all 6 reading frames (3 forward + 3 reverse)
   - Gene feature tracks with color-coding by type
+  - **Sequencing tracks**:
+    - Coverage histogram showing read depth
+    - Aligned reads with stacking to avoid overlaps
+    - Variant summary highlighting SNPs, insertions, and deletions
 
 ### Interactive Navigation
 - **Pan**:
@@ -71,6 +76,18 @@ When amino acid frames are enabled, amino acids are color-coded by type:
 - **Forward frames** (+1, +2, +3): Light blue background
 - **Reverse frames** (-1, -2, -3): Light orange background
 
+### Sequencing Track Color Coding
+
+#### Aligned Reads
+- **Forward strand**: Blue
+- **Reverse strand**: Red
+- **Opacity**: Based on mapping quality (higher quality = more opaque)
+
+#### Variant Summary
+- **SNPs (Single Nucleotide Polymorphisms)**: Red
+- **Insertions**: Purple
+- **Deletions**: Black
+
 ## Installation
 
 ### Prerequisites
@@ -98,18 +115,26 @@ cargo run --release
    - Supports: `.gff`, `.gff3`, `.gtf`
    - Gzipped: `.gff.gz`, `.gff3.gz`, `.gtf.gz`
 
-3. **Navigate**:
+3. **Load Sequencing Data** (optional): Click "Open BAM..." and select your alignment file
+   - Supports: `.bam` (Binary Alignment/Map format)
+   - Works with both native and WebAssembly builds
+   - Enable/disable individual tracks using checkboxes:
+     - "Show coverage": Read depth histogram
+     - "Show reads": Individual aligned reads with stacking
+     - "Show variants": SNPs and indels detected from CIGAR strings
+
+4. **Navigate**:
    - Select a chromosome from the left panel
    - Use the search box to filter chromosomes
    - Click sort buttons to change chromosome order
    - Drag to pan, scroll to zoom
 
-4. **Search and Jump**:
+5. **Search and Jump**:
    - **Go to position**: Enter `chr1:100000` in the "Go to:" field and press Enter
    - **Find features**: Enter a gene name in "Find feature:" and click Search
    - Browse results and click "Jump" to navigate to any feature
 
-5. **View Amino Acid Translation**:
+6. **View Amino Acid Translation**:
    - Enable the "Show amino acids (6 frames)" checkbox in the search panel
    - Zoom in to view level (< 5000 bases) to see the amino acid translations
    - All 6 reading frames are displayed (3 forward + 3 reverse)
@@ -133,6 +158,28 @@ chr1    source    gene    1000    5000    .    +    .    ID=gene1;Name=MyGene
 chr1    source    exon    1000    1500    .    +    .    Parent=gene1
 ```
 
+### BAM Files
+Binary Alignment/Map (BAM) format for aligned sequencing reads:
+- Stores aligned reads from sequencing experiments (DNA-seq, RNA-seq, etc.)
+- Binary compressed format for efficient storage
+- Parses CIGAR strings to detect variants (SNPs, insertions, deletions)
+- Computes coverage histograms with 100bp binning for performance
+- Displays up to 50 rows of stacked reads to avoid overlaps
+- Color-coded by strand (forward/reverse) and mapping quality
+
+**Supported Features:**
+- Read alignment visualization with CIGAR parsing
+- Coverage depth calculation across the genome
+- Variant detection from CIGAR operations (Match, Insertion, Deletion, Skip)
+- Strand-specific display (forward/reverse)
+- Mapping quality visualization (alpha blending)
+
+**Performance Notes:**
+- Coverage is pre-computed in 100bp bins for fast rendering
+- At >1000 visible reads, shows warning message and coverage only
+- Maximum 50 rows of stacked reads displayed
+- Works in both native and WebAssembly builds
+
 ## Navigation Controls
 - **Mouse wheel / Two-finger vertical swipe**: Zoom in/out (focus-aware)
 - **Click + drag**: Pan view horizontally
@@ -144,10 +191,11 @@ chr1    source    exon    1000    1500    .    +    .    Parent=gene1
 ### Modules
 - **fasta.rs**: FASTA genome parser with GC content calculation
 - **gff.rs**: GFF3/GTF annotation parser
+- **bam.rs**: BAM/SAM parser with CIGAR operations, variant extraction, and coverage calculation
 - **interval_tree.rs**: Efficient feature range queries
 - **viewport.rs**: View management (pan, zoom, coordinate mapping)
 - **translation.rs**: DNA to protein translation (standard genetic code, 6 frames)
-- **renderer.rs**: Multi-track genome visualization with amino acid display
+- **renderer.rs**: Multi-track genome visualization with amino acid display and sequencing tracks
 
 ### Performance Optimizations
 - Binary search for interval queries
@@ -223,10 +271,11 @@ The WebAssembly version supports three methods for loading files:
 4. Supports both plain and gzipped files (`.gz`)
 
 #### Method 2: Drag and Drop
-1. Drag a FASTA or GFF/GTF file from your computer onto the browser window
+1. Drag a FASTA, GFF/GTF, or BAM file from your computer onto the browser window
 2. The file will be automatically detected by extension and loaded
 3. Supports both plain and gzipped files (`.gz`)
 4. A visual overlay appears when hovering with files
+5. BAM files (`.bam`) are automatically recognized and parsed
 
 #### Method 3: HTTP/HTTPS URL
 1. Enter the full URL to your genome file in the URL field

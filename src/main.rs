@@ -5,6 +5,7 @@ mod renderer;
 mod viewport;
 mod file_loader;
 mod translation;
+mod bam;
 
 use anyhow::Result;
 use eframe::egui;
@@ -67,6 +68,7 @@ enum ChromosomeSort
 type GenomePromise = egui::mutex::Mutex<Option<poll_promise::Promise<Result<fasta::Genome>>>>;
 type FeaturesPromise =
     egui::mutex::Mutex<Option<poll_promise::Promise<Result<Vec<gff::Feature>>>>>;
+type BamPromise = egui::mutex::Mutex<Option<poll_promise::Promise<Result<bam::AlignmentData>>>>;
 
 struct GenomeViewer
 {
@@ -85,6 +87,12 @@ struct GenomeViewer
     search_results: Vec<(String, String, usize, usize)>, // (chr, name, start, end)
     show_search_results: bool,
     show_amino_acids: bool,
+    // BAM support
+    alignments: Option<bam::AlignmentData>,
+    bam_path: String,
+    show_coverage: bool,
+    show_alignments: bool,
+    show_variants: bool,
     #[cfg(target_arch = "wasm32")]
     genome_promise: GenomePromise,
     #[cfg(target_arch = "wasm32")]
@@ -93,6 +101,10 @@ struct GenomeViewer
     fasta_file_name: String,
     #[cfg(target_arch = "wasm32")]
     gff_file_name: String,
+    #[cfg(target_arch = "wasm32")]
+    bam_promise: BamPromise,
+    #[cfg(target_arch = "wasm32")]
+    bam_file_name: String,
     #[cfg(target_arch = "wasm32")]
     file_picker_open: Option<FilePickerType>,
     loading_progress: Option<LoadingProgress>,
@@ -104,6 +116,7 @@ enum FilePickerType
 {
     Fasta,
     Gff,
+    Bam,
 }
 
 #[derive(Clone)]
@@ -158,6 +171,12 @@ impl GenomeViewer
             search_results: Vec::new(),
             show_search_results: false,
             show_amino_acids: false,
+            // BAM support
+            alignments: None,
+            bam_path: String::new(),
+            show_coverage: true,
+            show_alignments: true,
+            show_variants: false,
             #[cfg(target_arch = "wasm32")]
             genome_promise: egui::mutex::Mutex::new(None),
             #[cfg(target_arch = "wasm32")]
@@ -166,6 +185,10 @@ impl GenomeViewer
             fasta_file_name: String::new(),
             #[cfg(target_arch = "wasm32")]
             gff_file_name: String::new(),
+            #[cfg(target_arch = "wasm32")]
+            bam_promise: egui::mutex::Mutex::new(None),
+            #[cfg(target_arch = "wasm32")]
+            bam_file_name: String::new(),
             #[cfg(target_arch = "wasm32")]
             file_picker_open: None,
             loading_progress: None,
@@ -585,6 +608,84 @@ impl GenomeViewer
         *self.features_promise.lock() = Some(promise);
     }
 
+    // BAM loading functions
+    #[cfg(not(target_arch = "wasm32"))]
+    fn load_bam(&mut self)
+    {
+        if self.bam_path.is_empty()
+        {
+            self.status_message = "Error: No BAM path specified".to_string();
+            return;
+        }
+
+        match bam::AlignmentData::from_file(&self.bam_path)
+        {
+            Ok(alignments) => {
+                let total_reads: usize = alignments.tracks.values().map(|t| t.records.len()).sum();
+                self.status_message = format!(
+                    "Loaded {} reads from {} references",
+                    total_reads,
+                    alignments.tracks.len()
+                );
+                self.alignments = Some(alignments);
+            }
+            Err(e) => {
+                self.status_message = format!("Error loading BAM: {}", e);
+            }
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn load_bam(&mut self)
+    {
+        if self.bam_path.is_empty()
+        {
+            self.status_message = "Error: No BAM path/URL specified".to_string();
+            return;
+        }
+
+        let path = self.bam_path.clone();
+        self.status_message = format!("Loading BAM from {}...", path);
+        self.loading_progress = Some(LoadingProgress {
+            description: "Downloading BAM file...".to_string(),
+            bytes_loaded: 0,
+            total_bytes: None,
+        });
+
+        let promise = poll_promise::Promise::spawn_local(async move {
+            let data = file_loader::load_file_async(&path).await?;
+            bam::AlignmentData::from_bytes(data)
+        });
+
+        *self.bam_promise.lock() = Some(promise);
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn load_bam_from_file(&mut self, file: web_sys::File)
+    {
+        let file_name = file.name();
+        let file_size = file.size() as usize;
+        self.bam_file_name = file_name.clone();
+        self.status_message = format!("Loading BAM from {}...", file_name);
+        self.loading_progress = Some(LoadingProgress {
+            description: "Reading BAM file...".to_string(),
+            bytes_loaded: 0,
+            total_bytes: Some(file_size),
+        });
+
+        let promise = poll_promise::Promise::spawn_local(async move {
+            use gloo_file::futures::read_as_bytes;
+
+            let data = read_as_bytes(&file.into())
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to read file: {:?}", e))?;
+
+            bam::AlignmentData::from_bytes(data)
+        });
+
+        *self.bam_promise.lock() = Some(promise);
+    }
+
     #[cfg(target_arch = "wasm32")]
     fn open_file_picker(&mut self, picker_type: FilePickerType)
     {
@@ -613,6 +714,10 @@ impl GenomeViewer
             FilePickerType::Gff =>
             {
                 input.set_accept(".gff,.gff3,.gtf,.gff.gz,.gff3.gz,.gtf.gz,.gz");
+            }
+            FilePickerType::Bam =>
+            {
+                input.set_accept(".bam");
             }
         }
 
@@ -648,6 +753,7 @@ impl GenomeViewer
         input.set_id(&format!("file_picker_{}", match picker_type {
             FilePickerType::Fasta => "fasta",
             FilePickerType::Gff => "gff",
+            FilePickerType::Bam => "bam",
         }));
 
         document.body()
@@ -669,6 +775,7 @@ impl GenomeViewer
             let element_id = format!("file_picker_{}", match picker_type {
                 FilePickerType::Fasta => "fasta",
                 FilePickerType::Gff => "gff",
+                FilePickerType::Bam => "bam",
             });
 
             if let Some(element) = document.get_element_by_id(&element_id)
@@ -692,6 +799,10 @@ impl GenomeViewer
                                     FilePickerType::Gff =>
                                     {
                                         self.load_gff_from_file(file);
+                                    }
+                                    FilePickerType::Bam =>
+                                    {
+                                        self.load_bam_from_file(file);
                                     }
                                 }
 
@@ -746,6 +857,45 @@ impl GenomeViewer
             }
         }
     }
+
+    #[cfg(target_arch = "wasm32")]
+    fn check_bam_promise(&mut self)
+    {
+        let mut promise_lock = self.bam_promise.lock();
+        if let Some(promise) = promise_lock.as_mut()
+        {
+            if let Some(result) = promise.ready()
+            {
+                self.loading_progress = None;
+                match result
+                {
+                    Ok(alignments) =>
+                    {
+                        let total_reads: usize = alignments.tracks.values().map(|t| t.records.len()).sum();
+                        self.status_message = format!(
+                            "Loaded {} reads from {} references",
+                            total_reads,
+                            alignments.tracks.len()
+                        );
+                        self.alignments = Some(alignments.clone());
+                    }
+                    Err(e) =>
+                    {
+                        self.status_message = format!("Error loading BAM: {}", e);
+                    }
+                }
+                *promise_lock = None;
+            }
+            else
+            {
+                // Still loading - update progress description
+                if let Some(ref mut progress) = self.loading_progress
+                {
+                    progress.description = "Parsing BAM...".to_string();
+                }
+            }
+        }
+    }
 }
 
 impl eframe::App for GenomeViewer
@@ -758,6 +908,7 @@ impl eframe::App for GenomeViewer
             self.check_file_picker();
             self.check_genome_promise();
             self.check_features_promise();
+            self.check_bam_promise();
 
             // Handle drag and drop files
             ctx.input(|i| {
@@ -812,6 +963,23 @@ impl eframe::App for GenomeViewer
                                     gff::parse_gff_bytes(data, is_gzipped)
                                 });
                                 *self.features_promise.lock() = Some(promise);
+                            }
+                            else if lower_name.ends_with(".bam")
+                            {
+                                // Load as BAM
+                                self.bam_file_name = name.clone();
+                                self.status_message = format!("Loading BAM from {}...", name);
+                                self.loading_progress = Some(LoadingProgress {
+                                    description: "Parsing BAM...".to_string(),
+                                    bytes_loaded: file_size,
+                                    total_bytes: Some(file_size),
+                                });
+
+                                let data = bytes.clone().to_vec();
+                                let promise = poll_promise::Promise::spawn_local(async move {
+                                    bam::AlignmentData::from_bytes(data)
+                                });
+                                *self.bam_promise.lock() = Some(promise);
                             }
                         }
                     }
@@ -933,6 +1101,64 @@ impl eframe::App for GenomeViewer
                         });
                     });
                 }
+
+                ui.separator();
+
+                // BAM file loading
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    if ui.button("Open BAM...").clicked()
+                    {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter("BAM", &["bam"])
+                            .add_filter("All files", &["*"])
+                            .pick_file()
+                        {
+                            self.bam_path = path.display().to_string();
+                            self.load_bam();
+                        }
+                    }
+
+                    if !self.bam_path.is_empty()
+                    {
+                        ui.label(format!("📊 {}",
+                            std::path::Path::new(&self.bam_path)
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or(&self.bam_path)
+                        ));
+                    }
+                }
+
+                #[cfg(target_arch = "wasm32")]
+                {
+                    ui.vertical(|ui| {
+                        ui.horizontal(|ui| {
+                            if ui.button("Browse...").clicked()
+                            {
+                                self.open_file_picker(FilePickerType::Bam);
+                            }
+                            ui.label("BAM or drag & drop file or enter URL");
+                        });
+
+                        ui.horizontal(|ui| {
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.bam_path)
+                                    .hint_text("https://example.com/file.bam")
+                                    .desired_width(400.0),
+                            );
+                            if ui.button("Load").clicked()
+                            {
+                                self.load_bam();
+                            }
+                        });
+
+                        if !self.bam_file_name.is_empty()
+                        {
+                            ui.label(format!("📊 {}", self.bam_file_name));
+                        }
+                    });
+                }
             });
         });
 
@@ -974,6 +1200,16 @@ impl eframe::App for GenomeViewer
                 ui.separator();
 
                 ui.checkbox(&mut self.show_amino_acids, "Show amino acids (6 frames)");
+
+                // BAM display toggles
+                if self.alignments.is_some()
+                {
+                    ui.separator();
+                    ui.label("BAM Tracks:");
+                    ui.checkbox(&mut self.show_coverage, "Show coverage");
+                    ui.checkbox(&mut self.show_alignments, "Show reads");
+                    ui.checkbox(&mut self.show_variants, "Show variants");
+                }
             });
         });
 
@@ -1249,6 +1485,61 @@ impl eframe::App for GenomeViewer
                         chr_name,
                         self.show_amino_acids,
                     );
+
+                    // Render BAM tracks (if loaded and selected chromosome matches)
+                    if let Some(ref alignments) = self.alignments
+                    {
+                        if let Some(track) = alignments.tracks.get(chr_name)
+                        {
+                            // Start BAM tracks below genome tracks
+                            // Estimate y_offset based on visible genome tracks
+                            let mut bam_y_offset = response.rect.top() + 150.0;
+
+                            // Adjust based on what's visible
+                            if self.viewport.width() < 1000 {
+                                bam_y_offset += 50.0; // sequence track
+                            }
+                            if self.show_amino_acids && self.viewport.width() < 5000 {
+                                bam_y_offset += 130.0; // amino acid frames
+                            }
+                            if !self.features.is_empty() {
+                                bam_y_offset += 100.0; // feature tracks
+                            }
+
+                            if self.show_coverage
+                            {
+                                bam_y_offset = renderer::draw_coverage_track(
+                                    &painter,
+                                    response.rect,
+                                    track,
+                                    &self.viewport,
+                                    bam_y_offset,
+                                );
+                            }
+
+                            if self.show_alignments
+                            {
+                                bam_y_offset = renderer::draw_alignments(
+                                    &painter,
+                                    response.rect,
+                                    track,
+                                    &self.viewport,
+                                    bam_y_offset,
+                                );
+                            }
+
+                            if self.show_variants
+                            {
+                                renderer::draw_variant_summary(
+                                    &painter,
+                                    response.rect,
+                                    track,
+                                    &self.viewport,
+                                    bam_y_offset,
+                                );
+                            }
+                        }
+                    }
                 }
             }
             else
