@@ -703,6 +703,7 @@ pub fn draw_alignments(
     viewport: &Viewport,
     y_offset: f32,
     height: f32,
+    max_reads_display: usize,
 ) -> f32
 {
     // Filter reads in viewport
@@ -713,12 +714,12 @@ pub fn draw_alignments(
         .collect();
 
     // If too many reads, show message instead
-    if visible_reads.len() > 1000
+    if visible_reads.len() > max_reads_display
     {
         painter.text(
             Pos2::new(rect.left() + 5.0, y_offset + 5.0),
             egui::Align2::LEFT_TOP,
-            format!("Too many reads ({}) - zoom in to view", visible_reads.len()),
+            format!("Too many reads ({}) - zoom in or increase limit to view", visible_reads.len()),
             FontId::proportional(12.0),
             Color32::DARK_GRAY,
         );

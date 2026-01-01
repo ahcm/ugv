@@ -198,6 +198,7 @@ struct GenomeViewer
     // BAM support
     alignments: Option<bam::AlignmentData>,
     bam_path: String,
+    max_reads_display: usize,
     // TSV custom tracks
     tsv_data: Option<tsv::TsvData>,
     tsv_path: String,
@@ -294,6 +295,7 @@ impl GenomeViewer
             // BAM support
             alignments: None,
             bam_path: String::new(),
+            max_reads_display: 1000,
             // TSV custom tracks
             tsv_data: None,
             tsv_path: String::new(),
@@ -1251,6 +1253,7 @@ impl GenomeViewer
                 .map(|c| c.visible)
                 .unwrap_or(false),
             chromosome_sort,
+            max_reads_display: self.max_reads_display,
         }
     }
 
@@ -1289,6 +1292,9 @@ impl GenomeViewer
             "Size" => ChromosomeSort::Size,
             _ => ChromosomeSort::Natural,
         };
+
+        // Restore max reads display
+        self.max_reads_display = session.max_reads_display;
 
         // For WASM, save viewport to restore after async load completes
         #[cfg(target_arch = "wasm32")]
@@ -2158,6 +2164,21 @@ impl eframe::App for GenomeViewer
                                         _ => {}
                                     }
 
+                                    // Alignments-specific controls
+                                    if track_type == TrackType::Alignments
+                                    {
+                                        ui.separator();
+                                        ui.label("Max reads to display:");
+                                        ui.horizontal(|ui| {
+                                            ui.add(
+                                                egui::Slider::new(&mut self.max_reads_display, 100..=10000)
+                                                    .logarithmic(true)
+                                                    .text("reads"),
+                                            );
+                                        });
+                                        ui.label(format!("Current: {} reads", self.max_reads_display));
+                                    }
+
                                     // Visibility toggle
                                     let config_mut = self.track_configs.get_mut(&track_type).unwrap();
                                     ui.checkbox(&mut config_mut.visible, "Visible");
@@ -2385,6 +2406,7 @@ impl eframe::App for GenomeViewer
                                         &self.viewport,
                                         y_offset,
                                         config.height,
+                                        self.max_reads_display,
                                     );
                                     y_offset += TRACK_SPACING;
                                 }

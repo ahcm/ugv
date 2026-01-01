@@ -17,6 +17,13 @@ pub struct Session
     pub show_alignments: bool,
     pub show_variants: bool,
     pub chromosome_sort: String, // "Natural", "Alphabetical", or "Size"
+    #[serde(default = "default_max_reads_display")]
+    pub max_reads_display: usize,
+}
+
+fn default_max_reads_display() -> usize
+{
+    1000
 }
 
 impl Session
@@ -37,6 +44,7 @@ impl Session
             show_alignments: true,
             show_variants: false,
             chromosome_sort: "Natural".to_string(),
+            max_reads_display: 1000,
         }
     }
 
