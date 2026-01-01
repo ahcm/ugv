@@ -82,6 +82,7 @@ struct GenomeViewer
     search_results: Vec<(String, String, usize, usize)>, // (chr, name, start, end)
     show_search_results: bool,
     show_amino_acids: bool,
+    show_chromosome_panel: bool,
     // BAM support
     alignments: Option<bam::AlignmentData>,
     bam_path: String,
@@ -166,6 +167,7 @@ impl GenomeViewer
             search_results: Vec::new(),
             show_search_results: false,
             show_amino_acids: false,
+            show_chromosome_panel: true,
             // BAM support
             alignments: None,
             bam_path: String::new(),
@@ -1221,6 +1223,7 @@ impl eframe::App for GenomeViewer
 
                 ui.separator();
 
+                ui.checkbox(&mut self.show_chromosome_panel, "Show chromosome list");
                 ui.checkbox(&mut self.show_amino_acids, "Show amino acids (6 frames)");
 
                 // BAM display toggles
@@ -1288,11 +1291,13 @@ impl eframe::App for GenomeViewer
             });
         });
 
-        egui::SidePanel::left("side_panel")
-            .min_width(250.0)
-            .show(ctx, |ui| {
-                ui.heading("Chromosomes");
-                ui.separator();
+        if self.show_chromosome_panel
+        {
+            egui::SidePanel::left("side_panel")
+                .min_width(250.0)
+                .show(ctx, |ui| {
+                    ui.heading("Chromosomes");
+                    ui.separator();
 
                 if self.genome.is_some()
                 {
@@ -1373,6 +1378,7 @@ impl eframe::App for GenomeViewer
                     ui.label("No genome loaded");
                 }
             });
+        }
 
         // Search results window
         let mut keep_results_open = self.show_search_results;
