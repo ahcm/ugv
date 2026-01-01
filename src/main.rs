@@ -67,6 +67,44 @@ type GenomePromise = egui::mutex::Mutex<Option<poll_promise::Promise<Result<fast
 type FeaturesPromise = egui::mutex::Mutex<Option<poll_promise::Promise<Result<Vec<gff::Feature>>>>>;
 type BamPromise = egui::mutex::Mutex<Option<poll_promise::Promise<Result<bam::AlignmentData>>>>;
 
+/// Track types for ordering and configuration
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum TrackType
+{
+    Ruler,
+    GcContent,
+    Sequence,
+    AminoAcids,
+    Features,
+    Coverage,
+    Alignments,
+    Variants,
+    CustomTsv,
+}
+
+/// Configuration for a single track
+#[derive(Debug, Clone)]
+struct TrackConfig
+{
+    track_type: TrackType,
+    height: f32,
+    visible: bool,
+    order: usize,
+}
+
+impl TrackConfig
+{
+    fn new(track_type: TrackType, height: f32, order: usize) -> Self
+    {
+        Self {
+            track_type,
+            height,
+            visible: true,
+            order,
+        }
+    }
+}
+
 struct GenomeViewer
 {
     genome: Option<fasta::Genome>,
@@ -97,6 +135,10 @@ struct GenomeViewer
     show_tsv_track: bool,
     #[cfg(target_arch = "wasm32")]
     tsv_file_name: String,
+    // Track configuration
+    track_configs: std::collections::HashMap<TrackType, TrackConfig>,
+    track_order: Vec<TrackType>,
+    show_track_panel: bool,
     #[cfg(target_arch = "wasm32")]
     genome_promise: GenomePromise,
     #[cfg(target_arch = "wasm32")]
@@ -190,6 +232,10 @@ impl GenomeViewer
             show_tsv_track: true,
             #[cfg(target_arch = "wasm32")]
             tsv_file_name: String::new(),
+            // Track configuration - initialize default tracks
+            track_configs: Self::default_track_configs(),
+            track_order: Self::default_track_order(),
+            show_track_panel: false,
             #[cfg(target_arch = "wasm32")]
             genome_promise: egui::mutex::Mutex::new(None),
             #[cfg(target_arch = "wasm32")]
@@ -206,6 +252,41 @@ impl GenomeViewer
             file_picker_open: None,
             loading_progress: None,
         }
+    }
+
+    fn default_track_configs() -> std::collections::HashMap<TrackType, TrackConfig>
+    {
+        let mut configs = std::collections::HashMap::new();
+
+        // Fixed tracks (non-adjustable)
+        configs.insert(TrackType::Ruler, TrackConfig::new(TrackType::Ruler, 30.0, 0));
+        configs.insert(TrackType::GcContent, TrackConfig::new(TrackType::GcContent, 60.0, 1));
+        configs.insert(TrackType::Sequence, TrackConfig::new(TrackType::Sequence, 20.0, 2));
+
+        // Adjustable tracks - default heights
+        configs.insert(TrackType::AminoAcids, TrackConfig::new(TrackType::AminoAcids, 120.0, 3));
+        configs.insert(TrackType::Features, TrackConfig::new(TrackType::Features, 150.0, 4));
+        configs.insert(TrackType::Coverage, TrackConfig::new(TrackType::Coverage, 80.0, 5));
+        configs.insert(TrackType::Alignments, TrackConfig::new(TrackType::Alignments, 200.0, 6));
+        configs.insert(TrackType::Variants, TrackConfig::new(TrackType::Variants, 50.0, 7));
+        configs.insert(TrackType::CustomTsv, TrackConfig::new(TrackType::CustomTsv, 100.0, 8));
+
+        configs
+    }
+
+    fn default_track_order() -> Vec<TrackType>
+    {
+        vec![
+            TrackType::Ruler,
+            TrackType::GcContent,
+            TrackType::Sequence,
+            TrackType::AminoAcids,
+            TrackType::Features,
+            TrackType::Coverage,
+            TrackType::Alignments,
+            TrackType::Variants,
+            TrackType::CustomTsv,
+        ]
     }
 
     fn extract_chromosome_number(name: &str) -> Option<u32>
@@ -1673,6 +1754,7 @@ impl eframe::App for GenomeViewer
                 ui.separator();
 
                 ui.checkbox(&mut self.show_chromosome_panel, "Show chromosome list");
+                ui.checkbox(&mut self.show_track_panel, "Show track config");
                 ui.checkbox(&mut self.show_amino_acids, "Show amino acids (6 frames)");
 
                 // BAM display toggles
@@ -1885,6 +1967,88 @@ impl eframe::App for GenomeViewer
         if let Some((chr, start, end)) = jump_to
         {
             self.jump_to_feature(&chr, start, end);
+        }
+
+        // Track configuration panel
+        if self.show_track_panel
+        {
+            egui::SidePanel::right("track_config_panel")
+                .min_width(300.0)
+                .show(ctx, |ui| {
+                    ui.heading("Track Configuration");
+                    ui.separator();
+
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        // Get tracks in order
+                        let ordered_tracks: Vec<_> = self.track_order.clone();
+
+                        for (idx, &track_type) in ordered_tracks.iter().enumerate()
+                        {
+                            if self.track_configs.contains_key(&track_type)
+                            {
+                                let track_name = format!("{:?}", track_type);
+
+                                ui.group(|ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(egui::RichText::new(&track_name).strong());
+
+                                        // Reorder buttons
+                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                            if idx < ordered_tracks.len() - 1 && ui.button("▼").clicked()
+                                            {
+                                                // Move down
+                                                self.track_order.swap(idx, idx + 1);
+                                            }
+                                            if idx > 0 && ui.button("▲").clicked()
+                                            {
+                                                // Move up
+                                                self.track_order.swap(idx, idx - 1);
+                                            }
+                                        });
+                                    });
+
+                                    // Height slider for adjustable tracks
+                                    match track_type
+                                    {
+                                        TrackType::AminoAcids
+                                        | TrackType::Features
+                                        | TrackType::Coverage
+                                        | TrackType::Alignments
+                                        | TrackType::Variants
+                                        | TrackType::CustomTsv =>
+                                        {
+                                            let config_mut = self.track_configs.get_mut(&track_type).unwrap();
+                                            ui.horizontal(|ui| {
+                                                ui.label("Height:");
+                                                ui.add(
+                                                    egui::Slider::new(&mut config_mut.height, 20.0..=500.0)
+                                                        .text("px"),
+                                                );
+                                            });
+
+                                            // Show current height
+                                            ui.label(format!("Current: {:.0} px", config_mut.height));
+                                        }
+                                        _ => {}
+                                    }
+
+                                    // Visibility toggle
+                                    let config_mut = self.track_configs.get_mut(&track_type).unwrap();
+                                    ui.checkbox(&mut config_mut.visible, "Visible");
+                                });
+
+                                ui.add_space(5.0);
+                            }
+                        }
+
+                        ui.separator();
+                        if ui.button("Reset to Defaults").clicked()
+                        {
+                            self.track_configs = Self::default_track_configs();
+                            self.track_order = Self::default_track_order();
+                        }
+                    });
+                });
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
