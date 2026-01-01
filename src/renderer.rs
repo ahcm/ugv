@@ -3,6 +3,7 @@ use crate::fasta::Chromosome;
 use crate::gff::Feature;
 use crate::interval_tree::IntervalTree;
 use crate::translation;
+use crate::tsv::TsvChromosomeTrack;
 use crate::viewport::Viewport;
 use egui::{Color32, FontId, Painter, Pos2, Rect, Stroke, Vec2};
 
@@ -18,6 +19,9 @@ const COVERAGE_TRACK_HEIGHT: f32 = 80.0;
 const ALIGNMENT_ROW_HEIGHT: f32 = 12.0;
 const MAX_ALIGNMENT_ROWS: usize = 50;
 const VARIANT_TRACK_HEIGHT: f32 = 30.0;
+
+// TSV track constants
+const TSV_TRACK_HEIGHT: f32 = 100.0;
 
 pub fn render_genome(
     painter: &Painter,
@@ -903,6 +907,136 @@ pub fn draw_variant_summary(
                 Color32::from_rgb(200, 50, 50),
             );
         }
+    }
+
+    track_rect.bottom() + TRACK_SPACING
+}
+
+/// Draw TSV custom data track
+pub fn draw_tsv_track(
+    painter: &Painter,
+    rect: Rect,
+    track: &TsvChromosomeTrack,
+    track_name: &str,
+    viewport: &Viewport,
+    y_offset: f32,
+) -> f32
+{
+    let track_rect = Rect::from_min_size(
+        Pos2::new(rect.left(), y_offset),
+        Vec2::new(rect.width(), TSV_TRACK_HEIGHT),
+    );
+
+    // Draw track background
+    painter.rect_filled(track_rect, 0.0, Color32::from_gray(245));
+
+    // Draw track border
+    painter.rect_stroke(
+        track_rect,
+        0.0,
+        Stroke::new(1.0, Color32::from_gray(200)),
+    );
+
+    // Draw track label
+    painter.text(
+        Pos2::new(rect.left() + 5.0, y_offset + 5.0),
+        egui::Align2::LEFT_TOP,
+        track_name,
+        FontId::proportional(12.0),
+        Color32::from_gray(100),
+    );
+
+    // Get points in viewport range
+    let points = track.get_points_in_region(viewport.start, viewport.end);
+
+    if points.is_empty()
+    {
+        painter.text(
+            Pos2::new(rect.center().x, y_offset + TSV_TRACK_HEIGHT / 2.0),
+            egui::Align2::CENTER_CENTER,
+            "No data in this region",
+            FontId::proportional(12.0),
+            Color32::from_gray(150),
+        );
+        return track_rect.bottom() + TRACK_SPACING;
+    }
+
+    // Calculate value range for this view
+    let min_signal = points.iter().map(|p| p.signal).fold(f64::INFINITY, f64::min);
+    let max_signal = points.iter().map(|p| p.signal).fold(f64::NEG_INFINITY, f64::max);
+    let signal_range = max_signal - min_signal;
+
+    // Draw scale labels
+    let label_y_top = y_offset + 20.0;
+    let label_y_bottom = y_offset + TSV_TRACK_HEIGHT - 5.0;
+
+    painter.text(
+        Pos2::new(rect.left() + 5.0, label_y_top),
+        egui::Align2::LEFT_TOP,
+        format!("{:.2}", max_signal),
+        FontId::proportional(10.0),
+        Color32::from_gray(120),
+    );
+
+    painter.text(
+        Pos2::new(rect.left() + 5.0, label_y_bottom),
+        egui::Align2::LEFT_BOTTOM,
+        format!("{:.2}", min_signal),
+        FontId::proportional(10.0),
+        Color32::from_gray(120),
+    );
+
+    // Draw zero line if range includes zero
+    if min_signal <= 0.0 && max_signal >= 0.0 && signal_range > 0.0
+    {
+        let zero_y = y_offset + 25.0
+            + (TSV_TRACK_HEIGHT - 30.0) * (1.0 - ((0.0 - min_signal) / signal_range) as f32);
+        painter.line_segment(
+            [
+                Pos2::new(rect.left() + 50.0, zero_y),
+                Pos2::new(rect.right(), zero_y),
+            ],
+            Stroke::new(1.0, Color32::from_rgb(150, 150, 150)),
+        );
+    }
+
+    // Draw data as line graph
+    let data_area_top = y_offset + 25.0;
+    let data_area_height = TSV_TRACK_HEIGHT - 30.0;
+
+    let mut prev_pos: Option<Pos2> = None;
+
+    for point in &points
+    {
+        let x = rect.left()
+            + ((point.position - viewport.start) as f32 / (viewport.end - viewport.start) as f32)
+                * rect.width();
+
+        let normalized_signal = if signal_range > 0.0
+        {
+            ((point.signal - min_signal) / signal_range) as f32
+        }
+        else
+        {
+            0.5
+        };
+
+        let y = data_area_top + data_area_height * (1.0 - normalized_signal);
+        let pos = Pos2::new(x, y);
+
+        // Draw point
+        painter.circle_filled(pos, 2.0, Color32::from_rgb(50, 100, 200));
+
+        // Draw line to previous point
+        if let Some(prev) = prev_pos
+        {
+            painter.line_segment(
+                [prev, pos],
+                Stroke::new(1.5, Color32::from_rgb(50, 100, 200)),
+            );
+        }
+
+        prev_pos = Some(pos);
     }
 
     track_rect.bottom() + TRACK_SPACING

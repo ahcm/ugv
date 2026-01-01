@@ -8,6 +8,7 @@ A high-performance genome viewer built with Rust and egui, designed for interact
 - **FASTA Support**: Load genome sequences in FASTA format (plain or gzipped)
 - **GFF/GTF Annotations**: Display gene features from GFF3/GTF files (plain or gzipped)
 - **BAM Sequencing Data**: Display aligned sequencing reads from BAM files
+- **Custom TSV Tracks**: Load and visualize quantitative genomic data from TSV files
 - **Multi-track Display**:
   - Position ruler with adaptive scaling
   - GC content plot
@@ -18,6 +19,11 @@ A high-performance genome viewer built with Rust and egui, designed for interact
     - Coverage histogram showing read depth
     - Aligned reads with stacking to avoid overlaps
     - Variant summary highlighting SNPs, insertions, and deletions
+  - **Custom data tracks**:
+    - Line graph visualization of quantitative data
+    - Auto-scaling to fit data range
+    - Zero line indicator
+    - Position-based plotting
 
 ### Interactive Navigation
 - **Pan**:
@@ -135,24 +141,31 @@ cargo run --release
      - "Show reads": Individual aligned reads with stacking
      - "Show variants": SNPs and indels detected from CIGAR strings
 
-4. **Navigate**:
+4. **Load Custom Data Track** (optional): Click "Open TSV..." and select your data file
+   - Supports: `.tsv`, `.txt` (Tab-separated values)
+   - Format: chromosome TAB position TAB signal-value
+   - Displays quantitative genomic data as a line graph
+   - Auto-scales to data range in current view
+   - Enable/disable using "Show custom TSV track" checkbox
+
+5. **Navigate**:
    - Select a chromosome from the left panel
    - Use the search box to filter chromosomes
    - Click sort buttons to change chromosome order
    - Drag to pan, scroll to zoom
 
-5. **Search and Jump**:
+6. **Search and Jump**:
    - **Go to position**: Enter `chr1:100000` in the "Go to:" field and press Enter
    - **Find features**: Enter a gene name in "Find feature:" and click Search
    - Browse results and click "Jump" to navigate to any feature
 
-6. **View Amino Acid Translation**:
+7. **View Amino Acid Translation**:
    - Enable the "Show amino acids (6 frames)" checkbox in the search panel
    - Zoom in to view level (< 5000 bases) to see the amino acid translations
    - All 6 reading frames are displayed (3 forward + 3 reverse)
    - Amino acids are color-coded by biochemical properties
 
-7. **Save and Load Sessions**:
+8. **Save and Load Sessions**:
    - Click **💾 Save** in the Session section to save your current workspace
    - Saves file paths, viewport position, and all UI settings to a .ugv file
    - Click **📂 Load** to restore a previously saved session
@@ -199,6 +212,38 @@ Binary Alignment/Map (BAM) format for aligned sequencing reads:
 - Maximum 50 rows of stacked reads displayed
 - Works in both native and WebAssembly builds
 
+### TSV Custom Track Files
+Tab-separated values format for quantitative genomic data:
+
+**Format:**
+```tsv
+chr1	100	1.5
+chr1	200	2.3
+chr1	300	-0.5
+chr2	150	3.2
+```
+
+**Field Specifications:**
+- **Field 1** (chromosome): Chromosome name (must match FASTA chromosome names)
+- **Field 2** (position): Genomic position (0-based or 1-based, integer)
+- **Field 3** (signal): Quantitative value (float64)
+
+**Features:**
+- Simple tab-delimited format
+- File extensions: `.tsv` or `.txt`
+- Comments supported (lines starting with `#`)
+- Empty lines ignored
+- Flexible: works with any quantitative genomic data
+- Visualized as line graph with auto-scaling
+- Examples: expression levels, conservation scores, methylation ratios, etc.
+
+**Example Use Cases:**
+- Gene expression levels across genome
+- Conservation scores (PhyloP, PhastCons)
+- ChIP-seq signal tracks
+- Methylation percentages
+- Custom scoring metrics
+
 ### Session Files
 Session files store your workspace state in JSON format:
 ```json
@@ -238,11 +283,12 @@ Session files store your workspace state in JSON format:
 - **fasta.rs**: FASTA genome parser with GC content calculation
 - **gff.rs**: GFF3/GTF annotation parser
 - **bam.rs**: BAM/SAM parser with CIGAR operations, variant extraction, and coverage calculation
+- **tsv.rs**: TSV custom track parser for quantitative genomic data
 - **session.rs**: Session management for saving and restoring workspace state
 - **interval_tree.rs**: Efficient feature range queries
 - **viewport.rs**: View management (pan, zoom, coordinate mapping)
 - **translation.rs**: DNA to protein translation (standard genetic code, 6 frames)
-- **renderer.rs**: Multi-track genome visualization with amino acid display and sequencing tracks
+- **renderer.rs**: Multi-track genome visualization with amino acid display, sequencing tracks, and custom data tracks
 
 ### Performance Optimizations
 - Binary search for interval queries

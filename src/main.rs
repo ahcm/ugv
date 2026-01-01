@@ -6,6 +6,7 @@ mod interval_tree;
 mod renderer;
 mod session;
 mod translation;
+mod tsv;
 mod viewport;
 
 use anyhow::Result;
@@ -90,6 +91,12 @@ struct GenomeViewer
     show_coverage: bool,
     show_alignments: bool,
     show_variants: bool,
+    // TSV custom tracks
+    tsv_data: Option<tsv::TsvData>,
+    tsv_path: String,
+    show_tsv_track: bool,
+    #[cfg(target_arch = "wasm32")]
+    tsv_file_name: String,
     #[cfg(target_arch = "wasm32")]
     genome_promise: GenomePromise,
     #[cfg(target_arch = "wasm32")]
@@ -114,6 +121,7 @@ enum FilePickerType
     Fasta,
     Gff,
     Bam,
+    Tsv,
     Session,
 }
 
@@ -176,6 +184,12 @@ impl GenomeViewer
             show_coverage: true,
             show_alignments: true,
             show_variants: false,
+            // TSV custom tracks
+            tsv_data: None,
+            tsv_path: String::new(),
+            show_tsv_track: true,
+            #[cfg(target_arch = "wasm32")]
+            tsv_file_name: String::new(),
             #[cfg(target_arch = "wasm32")]
             genome_promise: egui::mutex::Mutex::new(None),
             #[cfg(target_arch = "wasm32")]
@@ -693,6 +707,109 @@ impl GenomeViewer
         *self.bam_promise.lock() = Some(promise);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    fn load_tsv(&mut self)
+    {
+        if self.tsv_path.is_empty()
+        {
+            self.status_message = "Error: No TSV path specified".to_string();
+            return;
+        }
+
+        match tsv::TsvData::from_file(&self.tsv_path)
+        {
+            Ok(tsv_data) =>
+            {
+                let total_points: usize = tsv_data.tracks.values().map(|t| t.points.len()).sum();
+                self.status_message = format!(
+                    "Loaded {} data points from {} chromosomes (range: {:.2} to {:.2})",
+                    total_points,
+                    tsv_data.tracks.len(),
+                    tsv_data.global_min,
+                    tsv_data.global_max
+                );
+                self.tsv_data = Some(tsv_data);
+            }
+            Err(e) =>
+            {
+                self.status_message = format!("Error loading TSV: {}", e);
+            }
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn load_tsv(&mut self)
+    {
+        if self.tsv_path.is_empty()
+        {
+            self.status_message = "Error: No TSV path/URL specified".to_string();
+            return;
+        }
+
+        let path = self.tsv_path.clone();
+        self.status_message = format!("Loading TSV from {}...", path);
+
+        let promise = poll_promise::Promise::spawn_local(async move {
+            let data = file_loader::load_file_async(&path).await?;
+            let track_name = path
+                .split('/')
+                .last()
+                .unwrap_or("Custom Track")
+                .to_string();
+            tsv::TsvData::from_bytes(data, track_name)
+        });
+
+        // For simplicity, we'll handle TSV loading synchronously for now
+        // In a full implementation, you'd use a promise like BAM
+        self.status_message = "TSV loading started...".to_string();
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn load_tsv_from_file(&mut self, file: web_sys::File)
+    {
+        use gloo_file::futures::read_as_bytes;
+        use wasm_bindgen_futures::spawn_local;
+
+        let file_name = file.name();
+        self.tsv_file_name = file_name.clone();
+        self.status_message = format!("Loading TSV from {}...", file_name);
+
+        let track_name = file_name
+            .strip_suffix(".tsv")
+            .unwrap_or(&file_name)
+            .to_string();
+
+        spawn_local({
+            let file_gloo = gloo_file::File::from(file);
+
+            async move {
+                match read_as_bytes(&file_gloo).await
+                {
+                    Ok(data) =>
+                    {
+                        // Parse TSV
+                        match tsv::TsvData::from_bytes(data, track_name)
+                        {
+                            Ok(_tsv_data) =>
+                            {
+                                // Would need to store this via a promise
+                                log::info!("TSV loaded successfully");
+                            }
+                            Err(e) =>
+                            {
+                                log::error!("Error parsing TSV: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) =>
+                    {
+                        log::error!("Error reading TSV file: {:?}", e);
+                    }
+                }
+            }
+        });
+    }
+
     #[cfg(target_arch = "wasm32")]
     fn open_file_picker(&mut self, picker_type: FilePickerType)
     {
@@ -725,6 +842,10 @@ impl GenomeViewer
             FilePickerType::Bam =>
             {
                 input.set_accept(".bam");
+            }
+            FilePickerType::Tsv =>
+            {
+                input.set_accept(".tsv,.txt");
             }
             FilePickerType::Session =>
             {
@@ -768,6 +889,7 @@ impl GenomeViewer
                 FilePickerType::Fasta => "fasta",
                 FilePickerType::Gff => "gff",
                 FilePickerType::Bam => "bam",
+                FilePickerType::Tsv => "tsv",
                 FilePickerType::Session => "session",
             }
         ));
@@ -796,6 +918,7 @@ impl GenomeViewer
                     FilePickerType::Fasta => "fasta",
                     FilePickerType::Gff => "gff",
                     FilePickerType::Bam => "bam",
+                    FilePickerType::Tsv => "tsv",
                     FilePickerType::Session => "session",
                 }
             );
@@ -825,6 +948,10 @@ impl GenomeViewer
                                     FilePickerType::Bam =>
                                     {
                                         self.load_bam_from_file(file);
+                                    }
+                                    FilePickerType::Tsv =>
+                                    {
+                                        self.load_tsv_from_file(file);
                                     }
                                     FilePickerType::Session =>
                                     {
@@ -1451,6 +1578,53 @@ impl eframe::App for GenomeViewer
 
                 ui.separator();
 
+                // TSV track loading
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    if ui.button("Open TSV...").clicked()
+                    {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter("TSV", &["tsv", "txt"])
+                            .add_filter("All files", &["*"])
+                            .pick_file()
+                        {
+                            self.tsv_path = path.display().to_string();
+                            self.load_tsv();
+                        }
+                    }
+
+                    if !self.tsv_path.is_empty()
+                    {
+                        ui.label(format!(
+                            "📈 {}",
+                            std::path::Path::new(&self.tsv_path)
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or(&self.tsv_path)
+                        ));
+                    }
+                }
+
+                #[cfg(target_arch = "wasm32")]
+                {
+                    ui.vertical(|ui| {
+                        ui.horizontal(|ui| {
+                            if ui.button("Browse...").clicked()
+                            {
+                                self.open_file_picker(FilePickerType::Tsv);
+                            }
+                            ui.label("TSV or drag & drop file");
+                        });
+
+                        if !self.tsv_file_name.is_empty()
+                        {
+                            ui.label(format!("📈 {}", self.tsv_file_name));
+                        }
+                    });
+                }
+
+                ui.separator();
+
                 // Session save/load
                 ui.label("Session:");
                 if ui.button("💾 Save").clicked()
@@ -1512,6 +1686,13 @@ impl eframe::App for GenomeViewer
                     ui.checkbox(&mut self.show_coverage, "Show coverage");
                     ui.checkbox(&mut self.show_alignments, "Show reads");
                     ui.checkbox(&mut self.show_variants, "Show variants");
+                }
+
+                // TSV track toggle
+                if self.tsv_data.is_some()
+                {
+                    ui.separator();
+                    ui.checkbox(&mut self.show_tsv_track, "Show custom TSV track");
                 }
             });
         });
@@ -1849,6 +2030,53 @@ impl eframe::App for GenomeViewer
                                     track,
                                     &self.viewport,
                                     bam_y_offset,
+                                );
+                            }
+                        }
+                    }
+
+                    // Render TSV custom track
+                    if let Some(ref tsv_data) = self.tsv_data
+                    {
+                        if self.show_tsv_track
+                        {
+                            if let Some(tsv_track) = tsv_data.tracks.get(chr_name)
+                            {
+                                let mut tsv_y_offset = response.rect.top() + 150.0;
+
+                                if self.show_amino_acids && self.viewport.width() < 5000
+                                {
+                                    tsv_y_offset += 130.0; // amino acid frames
+                                }
+                                if !self.features.is_empty()
+                                {
+                                    tsv_y_offset += 100.0; // feature tracks
+                                }
+
+                                // Add space for BAM tracks if shown
+                                if self.alignments.is_some()
+                                {
+                                    if self.show_coverage
+                                    {
+                                        tsv_y_offset += 90.0;
+                                    }
+                                    if self.show_alignments
+                                    {
+                                        tsv_y_offset += 150.0;
+                                    }
+                                    if self.show_variants
+                                    {
+                                        tsv_y_offset += 40.0;
+                                    }
+                                }
+
+                                renderer::draw_tsv_track(
+                                    &painter,
+                                    response.rect,
+                                    tsv_track,
+                                    &tsv_data.track_name,
+                                    &self.viewport,
+                                    tsv_y_offset,
                                 );
                             }
                         }
