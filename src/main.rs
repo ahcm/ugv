@@ -641,11 +641,10 @@ impl GenomeViewer
         {
             Ok(alignments) =>
             {
-                let total_reads: usize = alignments.tracks.values().map(|t| t.records.len()).sum();
+                let num_refs = alignments.reference_lengths.len();
                 self.status_message = format!(
-                    "Loaded {} reads from {} references",
-                    total_reads,
-                    alignments.tracks.len()
+                    "Loaded BAM file with {} reference sequences (reads will be loaded on demand)",
+                    num_refs
                 );
                 self.alignments = Some(alignments);
             }
@@ -1024,12 +1023,10 @@ impl GenomeViewer
                 {
                     Ok(alignments) =>
                     {
-                        let total_reads: usize =
-                            alignments.tracks.values().map(|t| t.records.len()).sum();
+                        let num_refs = alignments.reference_lengths.len();
                         self.status_message = format!(
-                            "Loaded {} reads from {} references",
-                            total_reads,
-                            alignments.tracks.len()
+                            "Loaded BAM file with {} reference sequences (reads will be loaded on demand)",
+                            num_refs
                         );
                         self.alignments = Some(alignments.clone());
                     }
@@ -1978,59 +1975,72 @@ impl eframe::App for GenomeViewer
                     );
 
                     // Render BAM tracks (if loaded and selected chromosome matches)
-                    if let Some(ref alignments) = self.alignments
+                    if let Some(ref mut alignments) = self.alignments
                     {
-                        if let Some(track) = alignments.tracks.get(chr_name)
+                        // Query the region for the current viewport
+                        match alignments.query_region(chr_name, self.viewport.start, self.viewport.end)
                         {
-                            // Start BAM tracks below genome tracks
-                            // Estimate y_offset based on visible genome tracks
-                            let mut bam_y_offset = response.rect.top() + 150.0;
+                            Ok(Some(track)) =>
+                            {
+                                // Start BAM tracks below genome tracks
+                                // Estimate y_offset based on visible genome tracks
+                                let mut bam_y_offset = response.rect.top() + 150.0;
 
-                            // Adjust based on what's visible
-                            if self.viewport.width() < 1000
-                            {
-                                bam_y_offset += 50.0; // sequence track
-                            }
-                            if self.show_amino_acids && self.viewport.width() < 5000
-                            {
-                                bam_y_offset += 130.0; // amino acid frames
-                            }
-                            if !self.features.is_empty()
-                            {
-                                bam_y_offset += 100.0; // feature tracks
-                            }
+                                // Adjust based on what's visible
+                                if self.viewport.width() < 1000
+                                {
+                                    bam_y_offset += 50.0; // sequence track
+                                }
+                                if self.show_amino_acids && self.viewport.width() < 5000
+                                {
+                                    bam_y_offset += 130.0; // amino acid frames
+                                }
+                                if !self.features.is_empty()
+                                {
+                                    bam_y_offset += 100.0; // feature tracks
+                                }
 
-                            if self.show_coverage
-                            {
-                                bam_y_offset = renderer::draw_coverage_track(
-                                    &painter,
-                                    response.rect,
-                                    track,
-                                    &self.viewport,
-                                    bam_y_offset,
-                                );
-                            }
+                                if self.show_coverage
+                                {
+                                    bam_y_offset = renderer::draw_coverage_track(
+                                        &painter,
+                                        response.rect,
+                                        track,
+                                        &self.viewport,
+                                        bam_y_offset,
+                                    );
+                                }
 
-                            if self.show_alignments
-                            {
-                                bam_y_offset = renderer::draw_alignments(
-                                    &painter,
-                                    response.rect,
-                                    track,
-                                    &self.viewport,
-                                    bam_y_offset,
-                                );
-                            }
+                                if self.show_alignments
+                                {
+                                    bam_y_offset = renderer::draw_alignments(
+                                        &painter,
+                                        response.rect,
+                                        track,
+                                        &self.viewport,
+                                        bam_y_offset,
+                                    );
+                                }
 
-                            if self.show_variants
+                                if self.show_variants
+                                {
+                                    renderer::draw_variant_summary(
+                                        &painter,
+                                        response.rect,
+                                        track,
+                                        &self.viewport,
+                                        bam_y_offset,
+                                    );
+                                }
+                            }
+                            Ok(None) =>
                             {
-                                renderer::draw_variant_summary(
-                                    &painter,
-                                    response.rect,
-                                    track,
-                                    &self.viewport,
-                                    bam_y_offset,
-                                );
+                                // No data for this chromosome
+                            }
+                            Err(e) =>
+                            {
+                                // Error loading region - show message to user
+                                eprintln!("Error querying BAM region: {}", e);
                             }
                         }
                     }
