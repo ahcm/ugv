@@ -613,6 +613,15 @@ pub fn draw_coverage_track(
     // Background
     painter.rect_filled(track_rect, 0.0, Color32::from_gray(250));
 
+    // Draw label
+    painter.text(
+        Pos2::new(rect.left() + 5.0, y_offset + 5.0),
+        egui::Align2::LEFT_TOP,
+        "Coverage",
+        FontId::proportional(12.0),
+        Color32::BLACK,
+    );
+
     // Get coverage data for viewport
     let bin_size = 100; // matches the bin size used in coverage calculation
     let start_bin = viewport.start / bin_size;
@@ -620,14 +629,28 @@ pub fn draw_coverage_track(
 
     if start_bin >= track.coverage.len()
     {
-        return track_rect.bottom() + TRACK_SPACING;
+        painter.text(
+            Pos2::new(rect.center().x, y_offset + height / 2.0),
+            egui::Align2::CENTER_CENTER,
+            "No coverage data",
+            FontId::proportional(11.0),
+            Color32::from_gray(150),
+        );
+        return track_rect.bottom();
     }
 
     let coverage_slice = &track.coverage[start_bin..end_bin];
 
     if coverage_slice.is_empty()
     {
-        return track_rect.bottom() + TRACK_SPACING;
+        painter.text(
+            Pos2::new(rect.center().x, y_offset + height / 2.0),
+            egui::Align2::CENTER_CENTER,
+            "No coverage in this region",
+            FontId::proportional(11.0),
+            Color32::from_gray(150),
+        );
+        return track_rect.bottom();
     }
 
     // Find max depth for scaling
@@ -659,7 +682,7 @@ pub fn draw_coverage_track(
         );
     }
 
-    // Draw label and max depth
+    // Update label with max depth
     let label_text = format!("Coverage (max: {})", max_depth);
     painter.text(
         Pos2::new(rect.left() + 5.0, y_offset + 5.0),
@@ -669,7 +692,7 @@ pub fn draw_coverage_track(
         Color32::BLACK,
     );
 
-    track_rect.bottom() + TRACK_SPACING
+    track_rect.bottom()
 }
 
 /// Draw alignment reads track
@@ -699,7 +722,7 @@ pub fn draw_alignments(
             FontId::proportional(12.0),
             Color32::DARK_GRAY,
         );
-        return y_offset + 30.0 + TRACK_SPACING;
+        return y_offset + height;
     }
 
     if visible_reads.is_empty()
@@ -757,7 +780,7 @@ pub fn draw_alignments(
         }
     }
 
-    track_rect.bottom() + TRACK_SPACING
+    track_rect.bottom()
 }
 
 /// Draw a single alignment read
@@ -900,7 +923,7 @@ pub fn draw_variant_summary(
         }
     }
 
-    track_rect.bottom() + TRACK_SPACING
+    track_rect.bottom()
 }
 
 /// Draw TSV custom data track
@@ -1030,5 +1053,5 @@ pub fn draw_tsv_track(
         prev_pos = Some(pos);
     }
 
-    track_rect.bottom() + TRACK_SPACING
+    track_rect.bottom()
 }
