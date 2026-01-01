@@ -2104,96 +2104,95 @@ impl eframe::App for GenomeViewer
         // Track configuration panel
         if self.show_track_panel
         {
-            egui::SidePanel::right("track_config_panel")
-                .min_width(300.0)
+            egui::TopBottomPanel::top("track_config_panel")
+                .resizable(true)
+                .default_height(120.0)
                 .show(ctx, |ui| {
-                    ui.heading("Track Configuration");
+                    ui.horizontal(|ui| {
+                        ui.heading("Track Configuration");
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("Reset to Defaults").clicked()
+                            {
+                                self.track_configs = Self::default_track_configs();
+                                self.track_order = Self::default_track_order();
+                            }
+                        });
+                    });
                     ui.separator();
 
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        // Get tracks in order
-                        let ordered_tracks: Vec<_> = self.track_order.clone();
+                    egui::ScrollArea::horizontal().show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            // Get tracks in order
+                            let ordered_tracks: Vec<_> = self.track_order.clone();
 
-                        for (idx, &track_type) in ordered_tracks.iter().enumerate()
-                        {
-                            if self.track_configs.contains_key(&track_type)
+                            for (idx, &track_type) in ordered_tracks.iter().enumerate()
                             {
-                                let track_name = format!("{:?}", track_type);
+                                if self.track_configs.contains_key(&track_type)
+                                {
+                                    let track_name = format!("{:?}", track_type);
 
-                                ui.group(|ui| {
-                                    ui.horizontal(|ui| {
-                                        ui.label(egui::RichText::new(&track_name).strong());
+                                    ui.group(|ui| {
+                                        ui.vertical(|ui| {
+                                            ui.set_min_width(150.0);
 
-                                        // Reorder buttons
-                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                            if idx < ordered_tracks.len() - 1 && ui.button("▼").clicked()
+                                            // Track name and reorder buttons
+                                            ui.horizontal(|ui| {
+                                                if idx > 0 && ui.small_button("◀").clicked()
+                                                {
+                                                    // Move left
+                                                    self.track_order.swap(idx, idx - 1);
+                                                }
+                                                ui.label(egui::RichText::new(&track_name).strong());
+                                                if idx < ordered_tracks.len() - 1 && ui.small_button("▶").clicked()
+                                                {
+                                                    // Move right
+                                                    self.track_order.swap(idx, idx + 1);
+                                                }
+                                            });
+
+                                            // Visibility toggle
+                                            let config_mut = self.track_configs.get_mut(&track_type).unwrap();
+                                            ui.checkbox(&mut config_mut.visible, "Visible");
+
+                                            // Height slider for adjustable tracks
+                                            match track_type
                                             {
-                                                // Move down
-                                                self.track_order.swap(idx, idx + 1);
+                                                TrackType::AminoAcids
+                                                | TrackType::Features
+                                                | TrackType::Coverage
+                                                | TrackType::Alignments
+                                                | TrackType::Variants
+                                                | TrackType::CustomTsv =>
+                                                {
+                                                    let config_mut = self.track_configs.get_mut(&track_type).unwrap();
+                                                    ui.label("Height:");
+                                                    ui.add(
+                                                        egui::Slider::new(&mut config_mut.height, 20.0..=500.0)
+                                                            .text("px")
+                                                            .orientation(egui::SliderOrientation::Vertical),
+                                                    );
+                                                }
+                                                _ => {}
                                             }
-                                            if idx > 0 && ui.button("▲").clicked()
+
+                                            // Alignments-specific controls
+                                            if track_type == TrackType::Alignments
                                             {
-                                                // Move up
-                                                self.track_order.swap(idx, idx - 1);
+                                                ui.separator();
+                                                ui.label("Max reads:");
+                                                ui.add(
+                                                    egui::Slider::new(&mut self.max_reads_display, 100..=10000)
+                                                        .logarithmic(true)
+                                                        .orientation(egui::SliderOrientation::Vertical),
+                                                );
                                             }
                                         });
                                     });
 
-                                    // Height slider for adjustable tracks
-                                    match track_type
-                                    {
-                                        TrackType::AminoAcids
-                                        | TrackType::Features
-                                        | TrackType::Coverage
-                                        | TrackType::Alignments
-                                        | TrackType::Variants
-                                        | TrackType::CustomTsv =>
-                                        {
-                                            let config_mut = self.track_configs.get_mut(&track_type).unwrap();
-                                            ui.horizontal(|ui| {
-                                                ui.label("Height:");
-                                                ui.add(
-                                                    egui::Slider::new(&mut config_mut.height, 20.0..=500.0)
-                                                        .text("px"),
-                                                );
-                                            });
-
-                                            // Show current height
-                                            ui.label(format!("Current: {:.0} px", config_mut.height));
-                                        }
-                                        _ => {}
-                                    }
-
-                                    // Alignments-specific controls
-                                    if track_type == TrackType::Alignments
-                                    {
-                                        ui.separator();
-                                        ui.label("Max reads to display:");
-                                        ui.horizontal(|ui| {
-                                            ui.add(
-                                                egui::Slider::new(&mut self.max_reads_display, 100..=10000)
-                                                    .logarithmic(true)
-                                                    .text("reads"),
-                                            );
-                                        });
-                                        ui.label(format!("Current: {} reads", self.max_reads_display));
-                                    }
-
-                                    // Visibility toggle
-                                    let config_mut = self.track_configs.get_mut(&track_type).unwrap();
-                                    ui.checkbox(&mut config_mut.visible, "Visible");
-                                });
-
-                                ui.add_space(5.0);
+                                    ui.add_space(5.0);
+                                }
                             }
-                        }
-
-                        ui.separator();
-                        if ui.button("Reset to Defaults").clicked()
-                        {
-                            self.track_configs = Self::default_track_configs();
-                            self.track_order = Self::default_track_order();
-                        }
+                        });
                     });
                 });
         }
