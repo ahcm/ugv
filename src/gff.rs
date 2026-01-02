@@ -3,7 +3,7 @@ use flate2::read::GzDecoder;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Cursor};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Strand
 {
     Forward,

@@ -961,6 +961,182 @@ pub fn draw_variant_summary(
     track_rect.bottom()
 }
 
+/// Draw methylation track showing methylation levels from BAM
+pub fn draw_methylation_track(
+    painter: &Painter,
+    rect: Rect,
+    track: &AlignmentTrack,
+    viewport: &Viewport,
+    y_offset: f32,
+    height: f32,
+) -> f32
+{
+    let track_rect = Rect::from_min_size(
+        Pos2::new(rect.left(), y_offset),
+        Vec2::new(rect.width(), height),
+    );
+
+    // Background
+    painter.rect_filled(track_rect, 0.0, Color32::from_gray(250));
+
+    // Draw label
+    painter.text(
+        Pos2::new(rect.left() + 5.0, y_offset + 5.0),
+        egui::Align2::LEFT_TOP,
+        "Methylation",
+        FontId::proportional(12.0),
+        Color32::BLACK,
+    );
+
+    // Check if we have methylation data
+    if track.methylation.is_empty()
+    {
+        painter.text(
+            Pos2::new(rect.center().x, y_offset + height / 2.0),
+            egui::Align2::CENTER_CENTER,
+            "No methylation data",
+            FontId::proportional(11.0),
+            Color32::from_gray(150),
+        );
+        return track_rect.bottom();
+    }
+
+    // Get methylation data for viewport
+    let bin_size = 100;
+    let (region_start, region_end) = track.loaded_region.unwrap_or((0, track.reference_length));
+
+    // Only show methylation if viewport overlaps with loaded region
+    if viewport.end <= region_start || viewport.start >= region_end
+    {
+        painter.text(
+            Pos2::new(rect.center().x, y_offset + height / 2.0),
+            egui::Align2::CENTER_CENTER,
+            "Methylation not loaded for this region",
+            FontId::proportional(11.0),
+            Color32::from_gray(150),
+        );
+        return track_rect.bottom();
+    }
+
+    // Calculate bin indices relative to the loaded region start
+    let viewport_start_in_region = viewport.start.saturating_sub(region_start);
+    let viewport_end_in_region = viewport.end.saturating_sub(region_start);
+
+    let start_bin = viewport_start_in_region / bin_size;
+    let end_bin = ((viewport_end_in_region + bin_size - 1) / bin_size).min(track.methylation.len());
+
+    if start_bin >= track.methylation.len()
+    {
+        return track_rect.bottom();
+    }
+
+    let methylation_slice = &track.methylation[start_bin..end_bin];
+
+    // Find max calls for scaling
+    let max_calls = methylation_slice
+        .iter()
+        .map(|p| p.total_calls)
+        .max()
+        .unwrap_or(1)
+        .max(1);
+
+    // Count total methylation calls for label
+    let total_meth_calls: u32 = methylation_slice.iter().map(|p| p.methylated_calls).sum();
+    let total_calls: u32 = methylation_slice.iter().map(|p| p.total_calls).sum();
+
+    // Update label with methylation info
+    let avg_meth = if total_calls > 0
+    {
+        (total_meth_calls as f32 / total_calls as f32) * 100.0
+    }
+    else
+    {
+        0.0
+    };
+
+    painter.text(
+        Pos2::new(rect.left() + 5.0, y_offset + 5.0),
+        egui::Align2::LEFT_TOP,
+        format!("Methylation ({:.1}% avg)", avg_meth),
+        FontId::proportional(12.0),
+        Color32::BLACK,
+    );
+
+    // Draw methylation bars
+    let plot_height = height - 25.0;
+    let y_base = track_rect.bottom() - 5.0;
+
+    for point in methylation_slice
+    {
+        if point.position < viewport.start || point.position >= viewport.end || point.total_calls == 0
+        {
+            continue;
+        }
+
+        let x = viewport.position_to_screen(point.position, rect.width()) + rect.left();
+        let bar_width = (rect.width() / viewport.width() as f32 * bin_size as f32).max(1.0);
+
+        // Calculate methylation percentage
+        let meth_pct = point.methylated_calls as f32 / point.total_calls as f32;
+
+        // Height based on coverage (how many calls)
+        let bar_height = (point.total_calls as f32 / max_calls as f32) * plot_height;
+
+        // Color based on methylation percentage
+        // Low methylation: blue, High methylation: red
+        let r = (meth_pct * 255.0) as u8;
+        let b = ((1.0 - meth_pct) * 255.0) as u8;
+        let color = Color32::from_rgb(r, 50, b);
+
+        painter.rect_filled(
+            Rect::from_min_size(
+                Pos2::new(x, y_base - bar_height),
+                Vec2::new(bar_width, bar_height),
+            ),
+            0.0,
+            color,
+        );
+    }
+
+    // Draw legend
+    let legend_y = y_offset + 18.0;
+    let legend_x = rect.right() - 120.0;
+
+    // Draw gradient legend
+    for i in 0..50
+    {
+        let pct = i as f32 / 50.0;
+        let r = (pct * 255.0) as u8;
+        let b = ((1.0 - pct) * 255.0) as u8;
+        painter.rect_filled(
+            Rect::from_min_size(
+                Pos2::new(legend_x + i as f32 * 2.0, legend_y),
+                Vec2::new(2.0, 8.0),
+            ),
+            0.0,
+            Color32::from_rgb(r, 50, b),
+        );
+    }
+
+    painter.text(
+        Pos2::new(legend_x - 5.0, legend_y + 4.0),
+        egui::Align2::RIGHT_CENTER,
+        "0%",
+        FontId::proportional(9.0),
+        Color32::DARK_GRAY,
+    );
+
+    painter.text(
+        Pos2::new(legend_x + 105.0, legend_y + 4.0),
+        egui::Align2::LEFT_CENTER,
+        "100%",
+        FontId::proportional(9.0),
+        Color32::DARK_GRAY,
+    );
+
+    track_rect.bottom()
+}
+
 /// Draw TSV custom data track
 pub fn draw_tsv_track(
     painter: &Painter,

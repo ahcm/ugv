@@ -48,20 +48,52 @@ pub struct Variant
     pub quality: u8,
 }
 
+/// Methylation modification type
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ModificationType
+{
+    FiveMC,  // 5-methylcytosine (5mC) - most common
+    FiveHMC, // 5-hydroxymethylcytosine (5hmC)
+    SixMA,   // 6-methyladenine (6mA)
+    Other,
+}
+
+/// Single methylation call from a read
+#[derive(Debug, Clone)]
+pub struct MethylationCall
+{
+    pub position: usize,          // Genomic position (0-based)
+    pub read_position: usize,     // Position in read sequence
+    pub modification: ModificationType,
+    pub probability: u8,          // 0-255 (ML tag value)
+    pub strand: Strand,
+}
+
+/// Aggregated methylation data at a genomic position
+#[derive(Debug, Clone, Default)]
+pub struct MethylationPoint
+{
+    pub position: usize,
+    pub total_calls: u32,         // Number of reads covering this position
+    pub methylated_calls: u32,    // Reads with methylation probability > 128
+    pub probability_sum: u64,     // Sum of probabilities for averaging
+}
+
 /// Single alignment record with pre-computed fields
 #[derive(Debug, Clone)]
 pub struct AlignmentRecord
 {
     pub name: String,
-    pub reference_start: usize,  // 0-based position
-    pub reference_end: usize,    // Computed from alignment length
-    pub sequence: Vec<u8>,       // Read sequence
-    pub quality_scores: Vec<u8>, // Phred quality scores
-    pub mapping_quality: u8,     // MAPQ
-    pub flags: u16,              // SAM flags
-    pub strand: Strand,          // Forward or Reverse
-    pub cigar: Vec<CigarOp>,     // Parsed CIGAR operations
-    pub variants: Vec<Variant>,  // Pre-computed from CIGAR + MD tag
+    pub reference_start: usize,       // 0-based position
+    pub reference_end: usize,         // Computed from alignment length
+    pub sequence: Vec<u8>,            // Read sequence
+    pub quality_scores: Vec<u8>,      // Phred quality scores
+    pub mapping_quality: u8,          // MAPQ
+    pub flags: u16,                   // SAM flags
+    pub strand: Strand,               // Forward or Reverse
+    pub cigar: Vec<CigarOp>,          // Parsed CIGAR operations
+    pub variants: Vec<Variant>,       // Pre-computed from CIGAR + MD tag
+    pub methylation: Vec<MethylationCall>, // Methylation calls from MM/ML tags
 }
 
 impl AlignmentRecord
@@ -196,6 +228,7 @@ pub struct AlignmentTrack
     pub reference_length: usize,
     pub records: Vec<AlignmentRecord>,
     pub coverage: Vec<CoveragePoint>,
+    pub methylation: Vec<MethylationPoint>,
     pub loaded_region: Option<(usize, usize)>,
 }
 
@@ -208,6 +241,7 @@ impl AlignmentTrack
             reference_length,
             records: Vec::new(),
             coverage: Vec::new(),
+            methylation: Vec::new(),
             loaded_region: None,
         }
     }
@@ -256,11 +290,55 @@ impl AlignmentTrack
         self.coverage = coverage;
     }
 
+    /// Compute methylation levels with binning
+    pub fn compute_methylation(&mut self, bin_size: usize)
+    {
+        if self.reference_length == 0 || self.loaded_region.is_none()
+        {
+            return;
+        }
+
+        let (region_start, region_end) = self.loaded_region.unwrap();
+        let region_length = region_end - region_start;
+        let num_bins = (region_length + bin_size - 1) / bin_size;
+        let mut methylation = vec![MethylationPoint::default(); num_bins];
+
+        // Initialize positions
+        for (bin_idx, point) in methylation.iter_mut().enumerate()
+        {
+            point.position = region_start + bin_idx * bin_size;
+        }
+
+        // Aggregate methylation calls from all reads
+        for record in &self.records
+        {
+            for call in &record.methylation
+            {
+                if call.position >= region_start && call.position < region_end
+                {
+                    let bin_idx = (call.position - region_start) / bin_size;
+                    if bin_idx < num_bins
+                    {
+                        methylation[bin_idx].total_calls += 1;
+                        methylation[bin_idx].probability_sum += call.probability as u64;
+                        if call.probability > 128
+                        {
+                            methylation[bin_idx].methylated_calls += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        self.methylation = methylation;
+    }
+
     /// Clear loaded data to free memory
     pub fn clear(&mut self)
     {
         self.records.clear();
         self.coverage.clear();
+        self.methylation.clear();
         self.loaded_region = None;
     }
 }
@@ -489,8 +567,9 @@ impl AlignmentData
             }
         }
 
-        // Compute coverage for this region
+        // Compute coverage and methylation for this region
         track.compute_coverage(100); // 100bp bins
+        track.compute_methylation(100); // 100bp bins
 
         // Store in loaded_tracks, replacing any previous data for this chromosome
         self.loaded_tracks.insert(chromosome.to_string(), track);
@@ -569,9 +648,231 @@ impl AlignmentData
         }
 
         track.compute_coverage(100);
+        track.compute_methylation(100);
         self.loaded_tracks.insert(chromosome.to_string(), track);
 
         Ok(())
+    }
+
+    /// Parse methylation information from MM and ML tags
+    /// MM tag format: "C+m,0,5,3;" means methylated C at deltas 0, 5, 3 from each C
+    /// ML tag: array of probabilities (0-255) for each modification
+    fn parse_methylation_tags(
+        record: &bam::Record,
+        reference_start: usize,
+        cigar: &[CigarOp],
+        sequence: &[u8],
+        strand: Strand,
+    ) -> Vec<MethylationCall>
+    {
+        use noodles::sam::alignment::record::data::field::Tag;
+
+        let mut calls = Vec::new();
+
+        // Try to get MM tag (base modifications)
+        let mm_data = record.data();
+        let mm_value = mm_data.get(&Tag::BASE_MODIFICATIONS);
+
+        // Try to get ML tag (modification probabilities)
+        let ml_value = mm_data.get(&Tag::BASE_MODIFICATION_PROBABILITIES);
+
+        // Parse MM tag if present
+        let mm_string = match mm_value
+        {
+            Some(Ok(value)) =>
+            {
+                // Convert to string representation
+                format!("{:?}", value)
+            }
+            _ => return calls,
+        };
+
+        // Parse ML tag probabilities if present
+        let probabilities: Vec<u8> = match ml_value
+        {
+            Some(Ok(value)) =>
+            {
+                // Try to extract as array of u8
+                let ml_str = format!("{:?}", value);
+                // Parse array format like "Array(UInt8([128, 200, 150]))"
+                Self::parse_ml_array(&ml_str)
+            }
+            _ => Vec::new(),
+        };
+
+        // Parse MM tag format: "C+m,0,5,3;A+a,1,2;"
+        // Each section defines: BaseCode+ModCode,delta1,delta2,...;
+        let mm_clean = mm_string
+            .trim_matches('"')
+            .replace("String(\"", "")
+            .replace("\")", "");
+
+        let mut prob_idx = 0;
+
+        for section in mm_clean.split(';')
+        {
+            if section.is_empty()
+            {
+                continue;
+            }
+
+            let parts: Vec<&str> = section.split(',').collect();
+            if parts.is_empty()
+            {
+                continue;
+            }
+
+            // Parse base and modification type (e.g., "C+m" or "C+h")
+            let (base, mod_type) = Self::parse_mod_code(parts[0]);
+            if base == 0
+            {
+                continue;
+            }
+
+            // Find all positions of the target base in the sequence
+            let base_positions: Vec<usize> = sequence
+                .iter()
+                .enumerate()
+                .filter(|(_, &b)| b.to_ascii_uppercase() == base)
+                .map(|(i, _)| i)
+                .collect();
+
+            // Parse delta values and convert to actual positions
+            let mut base_idx = 0;
+            for delta_str in parts.iter().skip(1)
+            {
+                if let Ok(delta) = delta_str.parse::<usize>()
+                {
+                    base_idx += delta;
+                    if base_idx < base_positions.len()
+                    {
+                        let read_pos = base_positions[base_idx];
+
+                        // Convert read position to reference position using CIGAR
+                        if let Some(ref_pos) =
+                            Self::read_to_ref_position(read_pos, reference_start, cigar)
+                        {
+                            let probability = if prob_idx < probabilities.len()
+                            {
+                                probabilities[prob_idx]
+                            }
+                            else
+                            {
+                                200 // Default high probability if ML tag missing
+                            };
+
+                            calls.push(MethylationCall {
+                                position: ref_pos,
+                                read_position: read_pos,
+                                modification: mod_type,
+                                probability,
+                                strand,
+                            });
+                        }
+                        prob_idx += 1;
+                    }
+                    base_idx += 1; // Move past current base
+                }
+            }
+        }
+
+        calls
+    }
+
+    /// Parse modification code from MM tag (e.g., "C+m" -> (b'C', ModificationType::FiveMC))
+    fn parse_mod_code(code: &str) -> (u8, ModificationType)
+    {
+        let code = code.trim();
+        if code.len() < 3
+        {
+            return (0, ModificationType::Other);
+        }
+
+        let base = code.chars().next().unwrap_or(' ').to_ascii_uppercase() as u8;
+        let mod_char = code.chars().last().unwrap_or(' ');
+
+        let mod_type = match (base, mod_char)
+        {
+            (b'C', 'm') => ModificationType::FiveMC,   // 5mC
+            (b'C', 'h') => ModificationType::FiveHMC,  // 5hmC
+            (b'A', 'a') => ModificationType::SixMA,    // 6mA
+            _ => ModificationType::Other,
+        };
+
+        (base, mod_type)
+    }
+
+    /// Parse ML array from debug string format
+    fn parse_ml_array(ml_str: &str) -> Vec<u8>
+    {
+        // Handle format like "Array(UInt8([128, 200, 150]))" or similar
+        let mut result = Vec::new();
+
+        // Find the innermost array content
+        if let Some(start) = ml_str.find('[')
+        {
+            if let Some(end) = ml_str.rfind(']')
+            {
+                let array_content = &ml_str[start + 1..end];
+                for num_str in array_content.split(',')
+                {
+                    if let Ok(num) = num_str.trim().parse::<u8>()
+                    {
+                        result.push(num);
+                    }
+                }
+            }
+        }
+
+        result
+    }
+
+    /// Convert read position to reference position using CIGAR
+    fn read_to_ref_position(
+        read_pos: usize,
+        reference_start: usize,
+        cigar: &[CigarOp],
+    ) -> Option<usize>
+    {
+        let mut ref_pos = reference_start;
+        let mut read_offset = 0;
+
+        for op in cigar
+        {
+            match op
+            {
+                CigarOp::Match(len)
+                | CigarOp::SeqMatch(len)
+                | CigarOp::SeqMismatch(len) =>
+                {
+                    if read_offset + len > read_pos
+                    {
+                        return Some(ref_pos + (read_pos - read_offset));
+                    }
+                    read_offset += len;
+                    ref_pos += len;
+                }
+                CigarOp::Insertion(len) | CigarOp::SoftClip(len) =>
+                {
+                    if read_offset + len > read_pos
+                    {
+                        // Position is within insertion - no reference position
+                        return None;
+                    }
+                    read_offset += len;
+                }
+                CigarOp::Deletion(len) | CigarOp::Skip(len) =>
+                {
+                    ref_pos += len;
+                }
+                CigarOp::HardClip(_) | CigarOp::Padding(_) =>
+                {
+                    // No effect on positions
+                }
+            }
+        }
+
+        None
     }
 
     /// Parse a single BAM record into AlignmentRecord
@@ -654,6 +955,15 @@ impl AlignmentData
             Strand::Forward
         };
 
+        // Parse methylation from MM/ML tags
+        let methylation = Self::parse_methylation_tags(
+            record,
+            reference_start,
+            &cigar_ops,
+            &sequence,
+            strand,
+        );
+
         let mut alignment = AlignmentRecord {
             name,
             reference_start,
@@ -665,6 +975,7 @@ impl AlignmentData
             strand,
             cigar: cigar_ops,
             variants: Vec::new(),
+            methylation,
         };
 
         // Extract variants from CIGAR

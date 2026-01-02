@@ -152,6 +152,7 @@ enum TrackType
     Coverage,
     Alignments,
     Variants,
+    Methylation,
     CustomTsv,
 }
 
@@ -342,7 +343,8 @@ impl GenomeViewer
         configs.insert(TrackType::Coverage, TrackConfig::new(TrackType::Coverage, 80.0, 5));
         configs.insert(TrackType::Alignments, TrackConfig::new(TrackType::Alignments, 200.0, 6));
         configs.insert(TrackType::Variants, TrackConfig::new(TrackType::Variants, 50.0, 7));
-        configs.insert(TrackType::CustomTsv, TrackConfig::new(TrackType::CustomTsv, 100.0, 8));
+        configs.insert(TrackType::Methylation, TrackConfig::new(TrackType::Methylation, 80.0, 8));
+        configs.insert(TrackType::CustomTsv, TrackConfig::new(TrackType::CustomTsv, 100.0, 9));
 
         configs
     }
@@ -358,6 +360,7 @@ impl GenomeViewer
             TrackType::Coverage,
             TrackType::Alignments,
             TrackType::Variants,
+            TrackType::Methylation,
             TrackType::CustomTsv,
         ]
     }
@@ -2124,6 +2127,7 @@ impl eframe::App for GenomeViewer
                                         | TrackType::Coverage
                                         | TrackType::Alignments
                                         | TrackType::Variants
+                                        | TrackType::Methylation
                                         | TrackType::CustomTsv =>
                                         {
                                             let config_mut = self.track_configs.get_mut(&track_type).unwrap();
@@ -2401,6 +2405,24 @@ impl eframe::App for GenomeViewer
                                         config.height,
                                     );
                                     y_offset += TRACK_SPACING;
+                                }
+                            }
+                            TrackType::Methylation =>
+                            {
+                                if let Some(track) = bam_track
+                                {
+                                    if !track.methylation.is_empty()
+                                    {
+                                        y_offset = renderer::draw_methylation_track(
+                                            &painter,
+                                            response.rect,
+                                            track,
+                                            &self.viewport,
+                                            y_offset,
+                                            config.height,
+                                        );
+                                        y_offset += TRACK_SPACING;
+                                    }
                                 }
                             }
                             TrackType::CustomTsv =>
