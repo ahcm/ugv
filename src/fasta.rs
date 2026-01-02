@@ -1,7 +1,9 @@
 use anyhow::{Context, Result};
-use flate2::read::GzDecoder;
+use fastx::FastX::{fasta_iter, reader_from_path, FastXRead};
+use flate2::read::MultiGzDecoder;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Cursor};
+use std::path::Path;
 
 #[derive(Debug, Clone)]
 pub struct Chromosome
@@ -23,7 +25,7 @@ impl Genome
     {
         let reader: Box<dyn BufRead> = if is_gzipped
         {
-            Box::new(BufReader::new(GzDecoder::new(Cursor::new(data))))
+            Box::new(BufReader::new(MultiGzDecoder::new(Cursor::new(data))))
         }
         else
         {
@@ -36,8 +38,6 @@ impl Genome
     #[cfg(not(target_arch = "wasm32"))]
     pub fn from_file(path: &str) -> Result<Self>
     {
-        use std::fs::File;
-
         if path.starts_with("http://") || path.starts_with("https://")
         {
             return Err(anyhow::anyhow!(
@@ -45,17 +45,8 @@ impl Genome
             ));
         }
 
-        let file =
-            File::open(path).with_context(|| format!("Failed to open FASTA file: {}", path))?;
-
-        let reader: Box<dyn BufRead> = if path.ends_with(".gz")
-        {
-            Box::new(BufReader::new(GzDecoder::new(file)))
-        }
-        else
-        {
-            Box::new(BufReader::new(file))
-        };
+        let reader = reader_from_path(Path::new(path))
+            .with_context(|| format!("Failed to open FASTA file: {}", path))?;
 
         Self::parse_fasta(reader)
     }
@@ -63,56 +54,28 @@ impl Genome
     fn parse_fasta(reader: Box<dyn BufRead>) -> Result<Self>
     {
         let mut chromosomes = HashMap::new();
-        let mut current_name = String::new();
-        let mut current_seq = Vec::new();
 
-        for line in reader.lines()
+        for result in fasta_iter(reader)
         {
-            let line = line?;
-            let line = line.trim();
+            let record = result.with_context(|| "Failed to parse FASTA record")?;
 
-            if line.is_empty()
-            {
-                continue;
-            }
+            let name = record.id().to_string();
+            // Get sequence and convert to uppercase for consistency
+            let sequence: Vec<u8> = record.seq().iter().map(|&b| b.to_ascii_uppercase()).collect();
+            let length = sequence.len();
 
-            if line.starts_with('>')
-            {
-                // Save previous chromosome
-                if !current_name.is_empty()
-                {
-                    let chr = Chromosome {
-                        name: current_name.clone(),
-                        length: current_seq.len(),
-                        sequence: current_seq.clone(),
-                    };
-                    chromosomes.insert(current_name.clone(), chr);
-                }
+            let chr = Chromosome {
+                name: name.clone(),
+                length,
+                sequence,
+            };
 
-                // Start new chromosome
-                current_name = line[1..]
-                    .split_whitespace()
-                    .next()
-                    .unwrap_or("")
-                    .to_string();
-                current_seq = Vec::new();
-            }
-            else
-            {
-                // Add sequence data (convert to uppercase for consistency)
-                current_seq.extend(line.bytes().map(|b| b.to_ascii_uppercase()));
-            }
+            chromosomes.insert(name, chr);
         }
 
-        // Save last chromosome
-        if !current_name.is_empty()
+        if chromosomes.is_empty()
         {
-            let chr = Chromosome {
-                name: current_name.clone(),
-                length: current_seq.len(),
-                sequence: current_seq,
-            };
-            chromosomes.insert(current_name, chr);
+            return Err(anyhow::anyhow!("No sequences found in FASTA file"));
         }
 
         Ok(Genome { chromosomes })

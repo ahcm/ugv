@@ -311,7 +311,7 @@ Session files store your workspace state in JSON format:
 ## Architecture
 
 ### Modules
-- **fasta.rs**: FASTA genome parser with GC content calculation
+- **fasta.rs**: FASTA genome parser powered by [fastx](https://github.com/ahcm/fastx) library with flexible zlib backends (pure Rust by default for WASM compatibility)
 - **gff.rs**: GFF3/GTF annotation parser
 - **bam.rs**: BAM/SAM parser with CIGAR operations, variant extraction, and coverage calculation
 - **tsv.rs**: TSV custom track parser for quantitative genomic data
@@ -320,6 +320,13 @@ Session files store your workspace state in JSON format:
 - **viewport.rs**: View management (pan, zoom, coordinate mapping)
 - **translation.rs**: DNA to protein translation (standard genetic code, 6 frames)
 - **renderer.rs**: Multi-track genome visualization with amino acid display, sequencing tracks, and custom data tracks
+
+### Key Libraries
+- **[fastx](https://github.com/ahcm/fastx)**: Low-overhead FASTA/FASTQ parser with flexible zlib backend support
+  - Default: Pure Rust backend (miniz_oxide) for WASM and cross-platform compatibility
+  - Optional: System zlib, zlib-ng, or zlib-ng-compat for native performance
+- **[noodles](https://github.com/zaeleus/noodles)**: Pure Rust bioinformatics file formats (BAM/SAM support)
+- **[egui](https://github.com/emilk/egui)**: Immediate mode GUI framework with GPU acceleration
 
 ### Performance Optimizations
 - Binary search for interval queries
