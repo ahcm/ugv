@@ -1845,12 +1845,13 @@ impl eframe::App for GenomeViewer
         egui::TopBottomPanel::top("search_panel").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Go to:");
-                ui.add(
+                let go_to_response = ui.add(
                     egui::TextEdit::singleline(&mut self.position_search)
                         .hint_text("chr1:100000 or 100000")
                         .desired_width(150.0),
                 );
-                if ui.button("🔍 Jump").clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter))
+                let go_to_enter = go_to_response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                if ui.button("🔍 Jump").clicked() || go_to_enter
                 {
                     self.search_position();
                 }
@@ -1858,12 +1859,13 @@ impl eframe::App for GenomeViewer
                 ui.separator();
 
                 ui.label("Find feature:");
-                ui.add(
+                let feature_response = ui.add(
                     egui::TextEdit::singleline(&mut self.feature_search)
                         .hint_text("gene name, ID...")
                         .desired_width(150.0),
                 );
-                if ui.button("🔍 Search").clicked()
+                let feature_enter = feature_response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                if ui.button("🔍 Search").clicked() || feature_enter
                 {
                     self.search_features();
                 }
