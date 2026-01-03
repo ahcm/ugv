@@ -1473,7 +1473,7 @@ impl eframe::App for GenomeViewer
                 // Vertical scroll (two-finger swipe up/down) for zoom
                 let scroll_delta_y = ui.input(|i| i.smooth_scroll_delta.y);
 
-                if scroll_delta_y > scroll_delta_x
+                if scroll_delta_y.abs() > scroll_delta_x.abs()
                 {
                     if scroll_delta_y != 0.0
                     {
