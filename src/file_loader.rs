@@ -2,7 +2,8 @@ use anyhow::Result;
 
 /// Load file content from either a local path or HTTP URL
 #[allow(unused_variables)]
-pub fn load_file(path: &str) -> Result<Vec<u8>> {
+pub fn load_file(path: &str) -> Result<Vec<u8>>
+{
     #[cfg(not(target_arch = "wasm32"))]
     {
         load_file_native(path)
@@ -17,13 +18,15 @@ pub fn load_file(path: &str) -> Result<Vec<u8>> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn load_file_native(path: &str) -> Result<Vec<u8>> {
+fn load_file_native(path: &str) -> Result<Vec<u8>>
+{
     use anyhow::Context;
     use std::fs::File;
     use std::io::{BufReader, Read};
 
     // Check if it's a URL
-    if path.starts_with("http://") || path.starts_with("https://") {
+    if path.starts_with("http://") || path.starts_with("https://")
+    {
         return Err(anyhow::anyhow!(
             "HTTP URLs not supported in native build. Please download the file first."
         ));
@@ -39,7 +42,8 @@ fn load_file_native(path: &str) -> Result<Vec<u8>> {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub async fn load_file_async(path: &str) -> Result<Vec<u8>> {
+pub async fn load_file_async(path: &str) -> Result<Vec<u8>>
+{
     load_file_with_progress(path, |_, _| {}).await
 }
 
@@ -52,11 +56,9 @@ where
     use wasm_bindgen_futures::JsFuture;
     use web_sys::Response;
 
-    if !path.starts_with("http://") && !path.starts_with("https://") {
-        return Err(anyhow::anyhow!(
-            "In WASM, only HTTP/HTTPS URLs are supported. Got: {}",
-            path
-        ));
+    if !path.starts_with("http://") && !path.starts_with("https://")
+    {
+        return Err(anyhow::anyhow!("In WASM, only HTTP/HTTPS URLs are supported. Got: {}", path));
     }
 
     let window = web_sys::window().ok_or_else(|| anyhow::anyhow!("No window object"))?;
@@ -70,7 +72,8 @@ where
         .dyn_into()
         .map_err(|_| anyhow::anyhow!("Response cast failed"))?;
 
-    if !response.ok() {
+    if !response.ok()
+    {
         return Err(anyhow::anyhow!(
             "HTTP error {}: {}",
             response.status(),

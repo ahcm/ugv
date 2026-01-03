@@ -1,11 +1,11 @@
+mod bam;
 mod fasta;
+mod file_loader;
 mod gff;
 mod interval_tree;
 mod renderer;
-mod viewport;
-mod file_loader;
 mod translation;
-mod bam;
+mod viewport;
 
 use anyhow::Result;
 use eframe::egui;
@@ -47,11 +47,7 @@ fn main()
             .expect("the_canvas_id was not a HtmlCanvasElement");
 
         eframe::WebRunner::new()
-            .start(
-                canvas,
-                web_options,
-                Box::new(|_cc| Ok(Box::new(GenomeViewer::new()))),
-            )
+            .start(canvas, web_options, Box::new(|_cc| Ok(Box::new(GenomeViewer::new()))))
             .await
             .expect("failed to start eframe");
     });
@@ -66,8 +62,7 @@ enum ChromosomeSort
 }
 
 type GenomePromise = egui::mutex::Mutex<Option<poll_promise::Promise<Result<fasta::Genome>>>>;
-type FeaturesPromise =
-    egui::mutex::Mutex<Option<poll_promise::Promise<Result<Vec<gff::Feature>>>>>;
+type FeaturesPromise = egui::mutex::Mutex<Option<poll_promise::Promise<Result<Vec<gff::Feature>>>>>;
 type BamPromise = egui::mutex::Mutex<Option<poll_promise::Promise<Result<bam::AlignmentData>>>>;
 
 struct GenomeViewer
@@ -295,7 +290,8 @@ impl GenomeViewer
         }
         else
         {
-            self.status_message = "Invalid position format. Use 'chr1:100000' or '100000'".to_string();
+            self.status_message =
+                "Invalid position format. Use 'chr1:100000' or '100000'".to_string();
         }
     }
 
@@ -332,7 +328,11 @@ impl GenomeViewer
         }
         else
         {
-            self.status_message = format!("Found {} feature(s) matching '{}'", self.search_results.len(), self.feature_search);
+            self.status_message = format!(
+                "Found {} feature(s) matching '{}'",
+                self.search_results.len(),
+                self.feature_search
+            );
             self.show_search_results = true;
         }
     }
@@ -499,7 +499,8 @@ impl GenomeViewer
                 {
                     Ok(genome) =>
                     {
-                        self.status_message = format!("Loaded {} chromosomes", genome.chromosomes.len());
+                        self.status_message =
+                            format!("Loaded {} chromosomes", genome.chromosomes.len());
                         if let Some(first_chr) = genome.chromosomes.keys().next()
                         {
                             self.selected_chromosome = Some(first_chr.clone());
@@ -620,7 +621,8 @@ impl GenomeViewer
 
         match bam::AlignmentData::from_file(&self.bam_path)
         {
-            Ok(alignments) => {
+            Ok(alignments) =>
+            {
                 let total_reads: usize = alignments.tracks.values().map(|t| t.records.len()).sum();
                 self.status_message = format!(
                     "Loaded {} reads from {} references",
@@ -629,7 +631,8 @@ impl GenomeViewer
                 );
                 self.alignments = Some(alignments);
             }
-            Err(e) => {
+            Err(e) =>
+            {
                 self.status_message = format!("Error loading BAM: {}", e);
             }
         }
@@ -750,13 +753,18 @@ impl GenomeViewer
         // Store the input element in the DOM so we can check it later
         // We'll attach it to the body but make it hidden
         input.style().set_property("display", "none").ok();
-        input.set_id(&format!("file_picker_{}", match picker_type {
-            FilePickerType::Fasta => "fasta",
-            FilePickerType::Gff => "gff",
-            FilePickerType::Bam => "bam",
-        }));
+        input.set_id(&format!(
+            "file_picker_{}",
+            match picker_type
+            {
+                FilePickerType::Fasta => "fasta",
+                FilePickerType::Gff => "gff",
+                FilePickerType::Bam => "bam",
+            }
+        ));
 
-        document.body()
+        document
+            .body()
             .expect("no body")
             .append_child(&input)
             .expect("failed to append input");
@@ -772,11 +780,15 @@ impl GenomeViewer
             let window = web_sys::window().expect("no global window");
             let document = window.document().expect("no document");
 
-            let element_id = format!("file_picker_{}", match picker_type {
-                FilePickerType::Fasta => "fasta",
-                FilePickerType::Gff => "gff",
-                FilePickerType::Bam => "bam",
-            });
+            let element_id = format!(
+                "file_picker_{}",
+                match picker_type
+                {
+                    FilePickerType::Fasta => "fasta",
+                    FilePickerType::Gff => "gff",
+                    FilePickerType::Bam => "bam",
+                }
+            );
 
             if let Some(element) = document.get_element_by_id(&element_id)
             {
@@ -871,7 +883,8 @@ impl GenomeViewer
                 {
                     Ok(alignments) =>
                     {
-                        let total_reads: usize = alignments.tracks.values().map(|t| t.records.len()).sum();
+                        let total_reads: usize =
+                            alignments.tracks.values().map(|t| t.records.len()).sum();
                         self.status_message = format!(
                             "Loaded {} reads from {} references",
                             total_reads,
@@ -998,7 +1011,13 @@ impl eframe::App for GenomeViewer
                     {
                         if let Some(path) = rfd::FileDialog::new()
                             .add_filter("FASTA", &["fasta", "fa", "fna", "ffn", "faa", "frn"])
-                            .add_filter("FASTA (gzipped)", &["fasta.gz", "fa.gz", "fna.gz", "ffn.gz", "faa.gz", "frn.gz", "gz"])
+                            .add_filter(
+                                "FASTA (gzipped)",
+                                &[
+                                    "fasta.gz", "fa.gz", "fna.gz", "ffn.gz", "faa.gz", "frn.gz",
+                                    "gz",
+                                ],
+                            )
                             .add_filter("All files", &["*"])
                             .pick_file()
                         {
@@ -1009,7 +1028,8 @@ impl eframe::App for GenomeViewer
 
                     if !self.fasta_path.is_empty()
                     {
-                        ui.label(format!("📄 {}",
+                        ui.label(format!(
+                            "📄 {}",
                             std::path::Path::new(&self.fasta_path)
                                 .file_name()
                                 .and_then(|n| n.to_str())
@@ -1065,7 +1085,8 @@ impl eframe::App for GenomeViewer
 
                     if !self.gff_path.is_empty()
                     {
-                        ui.label(format!("📄 {}",
+                        ui.label(format!(
+                            "📄 {}",
                             std::path::Path::new(&self.gff_path)
                                 .file_name()
                                 .and_then(|n| n.to_str())
@@ -1121,7 +1142,8 @@ impl eframe::App for GenomeViewer
 
                     if !self.bam_path.is_empty()
                     {
-                        ui.label(format!("📊 {}",
+                        ui.label(format!(
+                            "📊 {}",
                             std::path::Path::new(&self.bam_path)
                                 .file_name()
                                 .and_then(|n| n.to_str())
@@ -1241,7 +1263,11 @@ impl eframe::App for GenomeViewer
                                 ui.add(
                                     egui::ProgressBar::new(progress_fraction)
                                         .show_percentage()
-                                        .text(format!("{} / {}", format_bytes(progress.bytes_loaded), format_bytes(total)))
+                                        .text(format!(
+                                            "{} / {}",
+                                            format_bytes(progress.bytes_loaded),
+                                            format_bytes(total)
+                                        )),
                                 );
                             }
                             else
@@ -1304,10 +1330,7 @@ impl eframe::App for GenomeViewer
                             self.chromosome_sort = ChromosomeSort::Alphabetical;
                         }
                         if ui
-                            .selectable_label(
-                                self.chromosome_sort == ChromosomeSort::Size,
-                                "Size",
-                            )
+                            .selectable_label(self.chromosome_sort == ChromosomeSort::Size, "Size")
                             .clicked()
                         {
                             self.chromosome_sort = ChromosomeSort::Size;
@@ -1415,11 +1438,7 @@ impl eframe::App for GenomeViewer
                         ));
 
                         let screen_rect = ctx.screen_rect();
-                        painter.rect_filled(
-                            screen_rect,
-                            0.0,
-                            egui::Color32::from_black_alpha(192),
-                        );
+                        painter.rect_filled(screen_rect, 0.0, egui::Color32::from_black_alpha(192));
 
                         painter.text(
                             screen_rect.center(),
@@ -1448,24 +1467,31 @@ impl eframe::App for GenomeViewer
 
             if let Some(hover_pos) = response.hover_pos()
             {
-                // Vertical scroll (two-finger swipe up/down) for zoom
-                let scroll_delta_y = ui.input(|i| i.smooth_scroll_delta.y);
-                if scroll_delta_y != 0.0
-                {
-                    let mouse_x = hover_pos.x - response.rect.left();
-                    let relative_pos = mouse_x / available_size.x;
-                    let zoom_factor = if scroll_delta_y > 0.0 { 0.9 } else { 1.1 };
-                    self.viewport.zoom(zoom_factor, relative_pos);
-                }
-
                 // Horizontal scroll (two-finger swipe left/right) for pan
                 let scroll_delta_x = ui.input(|i| i.smooth_scroll_delta.x);
-                if scroll_delta_x != 0.0
+
+                // Vertical scroll (two-finger swipe up/down) for zoom
+                let scroll_delta_y = ui.input(|i| i.smooth_scroll_delta.y);
+
+                if scroll_delta_y > scroll_delta_x
                 {
-                    let pixels_per_base =
-                        available_size.x / (self.viewport.end - self.viewport.start) as f32;
-                    let bases_moved = (scroll_delta_x / pixels_per_base) as i64;
-                    self.viewport.pan(bases_moved);
+                    if scroll_delta_y != 0.0
+                    {
+                        let mouse_x = hover_pos.x - response.rect.left();
+                        let relative_pos = mouse_x / available_size.x;
+                        let zoom_factor = if scroll_delta_y > 0.0 { 0.9 } else { 1.1 };
+                        self.viewport.zoom(zoom_factor, relative_pos);
+                    }
+                }
+                else
+                {
+                    if scroll_delta_x != 0.0
+                    {
+                        let pixels_per_base =
+                            available_size.x / (self.viewport.end - self.viewport.start) as f32;
+                        let bases_moved = (scroll_delta_x / pixels_per_base) as i64;
+                        self.viewport.pan(bases_moved);
+                    }
                 }
             }
 
@@ -1496,13 +1522,16 @@ impl eframe::App for GenomeViewer
                             let mut bam_y_offset = response.rect.top() + 150.0;
 
                             // Adjust based on what's visible
-                            if self.viewport.width() < 1000 {
+                            if self.viewport.width() < 1000
+                            {
                                 bam_y_offset += 50.0; // sequence track
                             }
-                            if self.show_amino_acids && self.viewport.width() < 5000 {
+                            if self.show_amino_acids && self.viewport.width() < 5000
+                            {
                                 bam_y_offset += 130.0; // amino acid frames
                             }
-                            if !self.features.is_empty() {
+                            if !self.features.is_empty()
+                            {
                                 bam_y_offset += 100.0; // feature tracks
                             }
 

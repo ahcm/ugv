@@ -1,9 +1,9 @@
+use crate::bam::{AlignmentRecord, AlignmentTrack, VariantType};
 use crate::fasta::Chromosome;
 use crate::gff::Feature;
 use crate::interval_tree::IntervalTree;
 use crate::translation;
 use crate::viewport::Viewport;
-use crate::bam::{AlignmentTrack, AlignmentRecord, VariantType};
 use egui::{Color32, FontId, Painter, Pos2, Rect, Stroke, Vec2};
 
 const RULER_HEIGHT: f32 = 30.0;
@@ -256,7 +256,8 @@ fn draw_amino_acid_frames(
     let start = viewport.start;
     let end = viewport.end.min(chromosome.length);
 
-    if start >= end {
+    if start >= end
+    {
         return y_offset;
     }
 
@@ -278,7 +279,8 @@ fn draw_amino_acid_frames(
     let mut current_y = y_offset;
 
     // Draw forward frames (top 3)
-    for (frame_idx, amino_acids) in forward_frames.iter().enumerate() {
+    for (frame_idx, amino_acids) in forward_frames.iter().enumerate()
+    {
         draw_single_frame(
             painter,
             rect,
@@ -294,7 +296,8 @@ fn draw_amino_acid_frames(
     }
 
     // Draw reverse frames (bottom 3)
-    for (frame_idx, amino_acids) in reverse_frames.iter().enumerate() {
+    for (frame_idx, amino_acids) in reverse_frames.iter().enumerate()
+    {
         draw_single_frame(
             painter,
             rect,
@@ -330,9 +333,12 @@ fn draw_single_frame(
     );
 
     // Draw background
-    let bg_color = if is_forward {
+    let bg_color = if is_forward
+    {
         Color32::from_rgb(240, 248, 255) // Light blue for forward
-    } else {
+    }
+    else
+    {
         Color32::from_rgb(255, 248, 240) // Light orange for reverse
     };
     painter.rect_filled(track_rect, 0.0, bg_color);
@@ -356,23 +362,30 @@ fn draw_single_frame(
     let char_width = pixels_per_base * 3.0; // Each amino acid represents 3 bases (codon)
 
     // Only draw if characters are visible
-    if char_width > 6.0 {
-        for (aa_idx, &aa) in amino_acids.iter().enumerate() {
-            let codon_pos = if is_forward {
+    if char_width > 6.0
+    {
+        for (aa_idx, &aa) in amino_acids.iter().enumerate()
+        {
+            let codon_pos = if is_forward
+            {
                 sequence_start + frame + (aa_idx * 3)
-            } else {
+            }
+            else
+            {
                 // For reverse strand, calculate the position
                 sequence_start + sequence_length.saturating_sub(frame + (aa_idx * 3) + 3)
             };
 
-            if codon_pos >= viewport.start && codon_pos < viewport.end {
+            if codon_pos >= viewport.start && codon_pos < viewport.end
+            {
                 let x = viewport.position_to_screen(codon_pos, rect.width()) + rect.left();
 
                 // Color based on amino acid type
                 let color = get_amino_acid_color(aa);
 
                 // Draw background for the amino acid
-                if char_width > 10.0 {
+                if char_width > 10.0
+                {
                     painter.rect_filled(
                         Rect::from_min_size(
                             Pos2::new(x, track_rect.top()),
@@ -384,7 +397,8 @@ fn draw_single_frame(
                 }
 
                 // Draw the amino acid letter if there's enough space
-                if char_width > 12.0 {
+                if char_width > 12.0
+                {
                     painter.text(
                         Pos2::new(x + char_width / 2.0, y_offset + AMINO_ACID_TRACK_HEIGHT / 2.0),
                         egui::Align2::CENTER_CENTER,
@@ -398,8 +412,10 @@ fn draw_single_frame(
     }
 }
 
-fn get_amino_acid_color(aa: char) -> Color32 {
-    match aa {
+fn get_amino_acid_color(aa: char) -> Color32
+{
+    match aa
+    {
         // Hydrophobic (aliphatic)
         'A' | 'V' | 'I' | 'L' | 'M' => Color32::from_rgb(0, 150, 0),
         // Aromatic
@@ -618,13 +634,15 @@ pub fn draw_coverage_track(
     let start_bin = viewport.start / bin_size;
     let end_bin = (viewport.end / bin_size).min(track.coverage.len());
 
-    if start_bin >= track.coverage.len() {
+    if start_bin >= track.coverage.len()
+    {
         return track_rect.bottom() + TRACK_SPACING;
     }
 
     let coverage_slice = &track.coverage[start_bin..end_bin];
 
-    if coverage_slice.is_empty() {
+    if coverage_slice.is_empty()
+    {
         return track_rect.bottom() + TRACK_SPACING;
     }
 
@@ -637,8 +655,10 @@ pub fn draw_coverage_track(
         .max(1);
 
     // Draw histogram bars
-    for point in coverage_slice {
-        if point.position < viewport.start || point.position >= viewport.end {
+    for point in coverage_slice
+    {
+        if point.position < viewport.start || point.position >= viewport.end
+        {
             continue;
         }
 
@@ -685,7 +705,8 @@ pub fn draw_alignments(
         .collect();
 
     // If too many reads, show message instead
-    if visible_reads.len() > 1000 {
+    if visible_reads.len() > 1000
+    {
         painter.text(
             Pos2::new(rect.left() + 5.0, y_offset + 5.0),
             egui::Align2::LEFT_TOP,
@@ -696,7 +717,8 @@ pub fn draw_alignments(
         return y_offset + 30.0 + TRACK_SPACING;
     }
 
-    if visible_reads.is_empty() {
+    if visible_reads.is_empty()
+    {
         return y_offset;
     }
 
@@ -708,9 +730,8 @@ pub fn draw_alignments(
         MAX_ALIGNMENT_ROWS,
     );
 
-    let total_height = (rows.len() as f32 * (ALIGNMENT_ROW_HEIGHT + 2.0)).min(
-        MAX_ALIGNMENT_ROWS as f32 * (ALIGNMENT_ROW_HEIGHT + 2.0),
-    );
+    let total_height = (rows.len() as f32 * (ALIGNMENT_ROW_HEIGHT + 2.0))
+        .min(MAX_ALIGNMENT_ROWS as f32 * (ALIGNMENT_ROW_HEIGHT + 2.0));
 
     // Background
     let track_rect = Rect::from_min_size(
@@ -729,11 +750,14 @@ pub fn draw_alignments(
     );
 
     // Draw reads
-    for (row_idx, row) in rows.iter().enumerate() {
+    for (row_idx, row) in rows.iter().enumerate()
+    {
         let row_y = y_offset + 20.0 + (row_idx as f32 * (ALIGNMENT_ROW_HEIGHT + 2.0));
 
-        for &read_idx in row {
-            if read_idx < track.records.len() {
+        for &read_idx in row
+        {
+            if read_idx < track.records.len()
+            {
                 let read = &track.records[read_idx];
                 draw_single_read(painter, &rect, read, viewport, row_y);
             }
@@ -757,7 +781,8 @@ fn draw_single_read(
     let width = (end_x - start_x).max(2.0);
 
     // Color by strand
-    let base_color = match read.strand {
+    let base_color = match read.strand
+    {
         crate::gff::Strand::Forward => Color32::from_rgb(100, 150, 200),
         crate::gff::Strand::Reverse => Color32::from_rgb(200, 100, 100),
         _ => Color32::GRAY,
@@ -765,17 +790,11 @@ fn draw_single_read(
 
     // Adjust alpha by mapping quality
     let alpha = ((read.mapping_quality as f32 / 60.0) * 200.0 + 55.0).min(255.0) as u8;
-    let color = Color32::from_rgba_premultiplied(
-        base_color.r(),
-        base_color.g(),
-        base_color.b(),
-        alpha,
-    );
+    let color =
+        Color32::from_rgba_premultiplied(base_color.r(), base_color.g(), base_color.b(), alpha);
 
-    let read_rect = Rect::from_min_size(
-        Pos2::new(start_x, y),
-        Vec2::new(width, ALIGNMENT_ROW_HEIGHT),
-    );
+    let read_rect =
+        Rect::from_min_size(Pos2::new(start_x, y), Vec2::new(width, ALIGNMENT_ROW_HEIGHT));
 
     painter.rect_filled(read_rect, 1.0, color);
     painter.rect_stroke(read_rect, 1.0, Stroke::new(0.5, Color32::from_gray(100)));
@@ -802,15 +821,20 @@ pub fn draw_variant_summary(
     let mut variant_counts: std::collections::HashMap<usize, (u32, u32, u32)> =
         std::collections::HashMap::new();
 
-    for record in &track.records {
-        if record.reference_start > viewport.end || record.reference_end < viewport.start {
+    for record in &track.records
+    {
+        if record.reference_start > viewport.end || record.reference_end < viewport.start
+        {
             continue;
         }
 
-        for variant in &record.variants {
-            if variant.position >= viewport.start && variant.position < viewport.end {
+        for variant in &record.variants
+        {
+            if variant.position >= viewport.start && variant.position < viewport.end
+            {
                 let counts = variant_counts.entry(variant.position).or_insert((0, 0, 0));
-                match variant.variant_type {
+                match variant.variant_type
+                {
                     VariantType::SNP => counts.0 += 1,
                     VariantType::Insertion => counts.1 += 1,
                     VariantType::Deletion => counts.2 += 1,
@@ -829,17 +853,18 @@ pub fn draw_variant_summary(
     );
 
     // Draw variant markers
-    for (pos, (snps, ins, del)) in variant_counts {
+    for (pos, (snps, ins, del)) in variant_counts
+    {
         let x = viewport.position_to_screen(pos, rect.width()) + rect.left();
         let total = snps + ins + del;
-        let height = ((total as f32 / 10.0).min(1.0) * (VARIANT_TRACK_HEIGHT - 15.0))
-            .max(2.0);
+        let height = ((total as f32 / 10.0).min(1.0) * (VARIANT_TRACK_HEIGHT - 15.0)).max(2.0);
         let y_bottom = track_rect.bottom() - 5.0;
 
         // Draw stacked bars
         let mut current_y = y_bottom;
 
-        if del > 0 {
+        if del > 0
+        {
             let del_height = (del as f32 / total as f32) * height;
             painter.rect_filled(
                 Rect::from_min_size(
@@ -852,7 +877,8 @@ pub fn draw_variant_summary(
             current_y -= del_height;
         }
 
-        if ins > 0 {
+        if ins > 0
+        {
             let ins_height = (ins as f32 / total as f32) * height;
             painter.rect_filled(
                 Rect::from_min_size(
@@ -865,7 +891,8 @@ pub fn draw_variant_summary(
             current_y -= ins_height;
         }
 
-        if snps > 0 {
+        if snps > 0
+        {
             let snp_height = (snps as f32 / total as f32) * height;
             painter.rect_filled(
                 Rect::from_min_size(

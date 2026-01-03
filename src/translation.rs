@@ -1,10 +1,13 @@
 /// Codon to amino acid translation table (standard genetic code)
-pub fn translate_codon(codon: &[u8]) -> char {
-    if codon.len() != 3 {
+pub fn translate_codon(codon: &[u8]) -> char
+{
+    if codon.len() != 3
+    {
         return 'X';
     }
 
-    match codon {
+    match codon
+    {
         // TTT, TTC -> F (Phe)
         b"TTT" | b"TTC" => 'F',
         // TTA, TTG, CTT, CTC, CTA, CTG -> L (Leu)
@@ -54,11 +57,13 @@ pub fn translate_codon(codon: &[u8]) -> char {
 
 /// Translate DNA sequence to amino acids in a specific reading frame
 /// frame: 0, 1, or 2 for the offset
-pub fn translate_frame(sequence: &[u8], frame: usize) -> Vec<char> {
+pub fn translate_frame(sequence: &[u8], frame: usize) -> Vec<char>
+{
     let mut amino_acids = Vec::new();
 
     let mut i = frame;
-    while i + 2 < sequence.len() {
+    while i + 2 < sequence.len()
+    {
         let codon = &sequence[i..i + 3];
         amino_acids.push(translate_codon(codon));
         i += 3;
@@ -68,7 +73,8 @@ pub fn translate_frame(sequence: &[u8], frame: usize) -> Vec<char> {
 }
 
 /// Get reverse complement of a DNA sequence
-pub fn reverse_complement(sequence: &[u8]) -> Vec<u8> {
+pub fn reverse_complement(sequence: &[u8]) -> Vec<u8>
+{
     sequence
         .iter()
         .rev()
@@ -77,8 +83,10 @@ pub fn reverse_complement(sequence: &[u8]) -> Vec<u8> {
 }
 
 /// Get complement of a single base
-fn complement_base(base: u8) -> u8 {
-    match base {
+fn complement_base(base: u8) -> u8
+{
+    match base
+    {
         b'A' => b'T',
         b'T' => b'A',
         b'G' => b'C',
@@ -93,7 +101,8 @@ fn complement_base(base: u8) -> u8 {
 
 /// Translate all 6 reading frames
 /// Returns: (forward frames [0,1,2], reverse frames [0,1,2])
-pub fn translate_six_frames(sequence: &[u8]) -> (Vec<Vec<char>>, Vec<Vec<char>>) {
+pub fn translate_six_frames(sequence: &[u8]) -> (Vec<Vec<char>>, Vec<Vec<char>>)
+{
     let forward_frames = vec![
         translate_frame(sequence, 0),
         translate_frame(sequence, 1),
@@ -111,11 +120,13 @@ pub fn translate_six_frames(sequence: &[u8]) -> (Vec<Vec<char>>, Vec<Vec<char>>)
 }
 
 #[cfg(test)]
-mod tests {
+mod tests
+{
     use super::*;
 
     #[test]
-    fn test_translate_codon() {
+    fn test_translate_codon()
+    {
         assert_eq!(translate_codon(b"ATG"), 'M'); // Start codon
         assert_eq!(translate_codon(b"TAA"), '*'); // Stop codon
         assert_eq!(translate_codon(b"GGG"), 'G'); // Glycine
@@ -123,14 +134,16 @@ mod tests {
     }
 
     #[test]
-    fn test_reverse_complement() {
+    fn test_reverse_complement()
+    {
         let seq = b"ATCG";
         let rev_comp = reverse_complement(seq);
         assert_eq!(rev_comp, b"CGAT");
     }
 
     #[test]
-    fn test_translate_frame() {
+    fn test_translate_frame()
+    {
         let seq = b"ATGGGGAAATAA"; // ATG GGG AAA TAA -> M G K *
         let amino_acids = translate_frame(seq, 0);
         assert_eq!(amino_acids, vec!['M', 'G', 'K', '*']);
