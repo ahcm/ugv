@@ -43,6 +43,23 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+
+        .error {
+            color: #d32f2f;
+            margin-top: 20px;
+        }
+
+        .error-box {
+            max-width: 500px;
+            padding: 20px;
+            background: #ffebee;
+            border-radius: 8px;
+            margin: 20px auto;
+        }
+
+        .error h2 {
+            margin-top: 0;
+        }
     </style>
 </head>
 <body>
@@ -55,14 +72,47 @@
     <script type="module">
         import init from './ugv.js';
 
+        function checkWebGL() {
+            const canvas = document.createElement('canvas');
+            const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+            if (!gl) {
+                return false;
+            }
+            // Check if the context is lost (could happen if WebGL is disabled)
+            const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+            return true;
+        }
+
         async function run() {
+            // Check WebGL support before initializing WASM
+            if (!checkWebGL()) {
+                document.getElementById('loading').innerHTML = `
+                    <div class="error-box">
+                        <h2>WebGL Not Supported</h2>
+                        <p><strong>UGV requires WebGL to render graphics.</strong></p>
+                        <p>Your browser doesn't support WebGL or it has been disabled.</p>
+                        <p class="error">Possible solutions:</p>
+                        <ul style="text-align: left;">
+                            <li>Update your browser to the latest version</li>
+                            <li>Enable hardware acceleration in your browser settings</li>
+                            <li>Check if your browser is using software rendering (disable if applicable)</li>
+                            <li>Ensure your graphics drivers are up to date</li>
+                        </ul>
+                        <p style="margin-top: 20px; font-size: 14px; color: #666;">
+                            Supported browsers: Chrome 56+, Firefox 51+, Safari 11+, Edge 79+
+                        </p>
+                    </div>
+                `;
+                return;
+            }
+
             await init();
             document.getElementById('loading').style.display = 'none';
         }
 
         run().catch(err => {
             document.getElementById('loading').innerHTML =
-                '<h2>Error loading application</h2><pre>' + err + '</pre>';
+                '<div class="error-box"><h2>Error loading application</h2><pre>' + err + '</pre></div>';
         });
     </script>
 </body>
