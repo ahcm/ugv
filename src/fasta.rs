@@ -411,7 +411,7 @@ impl Genome
             let bytes_needed = fai_entry.length + num_lines;
             let data_end = fai_entry.offset + bytes_needed;
             let raw_data = Self::fetch_url_range(&data_url, fai_entry.offset, data_end).await?;
-            Self::parse_fasta_sequence(&raw_data)
+            Self::process_raw_sequence(&raw_data)
         };
 
         if sequence.len() != length
@@ -530,7 +530,7 @@ impl Genome
         }
 
         // Parse the FASTA sequence from the decompressed data
-        Ok(Self::parse_fasta_sequence(&result))
+        Ok(Self::process_raw_sequence(&result))
     }
 
     /// Decompress a single BGZF block
@@ -562,35 +562,16 @@ impl Genome
         Ok(decompressed)
     }
 
-    /// Parse FASTA sequence from raw bytes (removes newlines and header)
+    /// Process raw sequence bytes (removes newlines)
     #[cfg(target_arch = "wasm32")]
-    fn parse_fasta_sequence(data: &[u8]) -> Vec<u8>
+    fn process_raw_sequence(data: &[u8]) -> Vec<u8>
     {
-        let mut result = Vec::new();
-        let mut in_sequence = false;
-
-        for line in data.split(|&b| b == b'\n')
+        let mut result = Vec::with_capacity(data.len());
+        for &byte in data
         {
-            if line.is_empty()
+            if byte != b'\r' && byte != b'\n' && !byte.is_ascii_whitespace()
             {
-                continue;
-            }
-            // Skip header line
-            if line[0] == b'>'
-            {
-                in_sequence = true;
-                continue;
-            }
-            // Add sequence bytes, converting to uppercase
-            if in_sequence
-            {
-                for &byte in line
-                {
-                    if byte != b'\r' && byte != b'\n' && !byte.is_ascii_whitespace()
-                    {
-                        result.push(byte.to_ascii_uppercase());
-                    }
-                }
+                result.push(byte.to_ascii_uppercase());
             }
         }
         result
