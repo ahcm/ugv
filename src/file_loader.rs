@@ -27,11 +27,26 @@ fn load_file_native(path: &str) -> Result<Vec<u8>>
     // Check if it's a URL
     if path.starts_with("http://") || path.starts_with("https://")
     {
-        return Err(anyhow::anyhow!(
-            "HTTP URLs not supported in native build. Please download the file first."
-        ));
+        // Use reqwest to download the file
+        let response = reqwest::blocking::get(path)
+            .with_context(|| format!("Failed to download from URL: {}", path))?;
+
+        if !response.status().is_success()
+        {
+            return Err(anyhow::anyhow!(
+                "HTTP error {}: Failed to download {}",
+                response.status(),
+                path
+            ));
+        }
+
+        let bytes = response.bytes()
+            .with_context(|| format!("Failed to read response body from: {}", path))?;
+
+        return Ok(bytes.to_vec());
     }
 
+    // Local file path
     let file = File::open(path).with_context(|| format!("Failed to open file: {}", path))?;
     let mut reader = BufReader::new(file);
     let mut buffer = Vec::new();
