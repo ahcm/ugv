@@ -147,21 +147,37 @@ impl Genome
 
     /// Load genome from a URL for WASM, checking for index files
     /// This function is async-compatible and returns a genome that can fetch ranges
-    /// For now, only supports uncompressed FASTA files with .fai index
+    /// Supports both uncompressed FASTA and BGZF-compressed FASTA with .fai and .gzi indexes
     #[cfg(target_arch = "wasm32")]
     pub fn from_url_wasm(url: &str, fai_data: Vec<u8>, gzi_data: Option<Vec<u8>>) -> Result<Self>
     {
-        // For gzipped files, we'd need BGZF decompression which is complex in WASM
-        // Fall back to error so caller will use full loading instead
-        if url.ends_with(".gz")
-        {
-            return Err(anyhow::anyhow!(
-                "Indexed loading for gzipped files not yet supported in WASM. Use full loading instead."
-            ));
-        }
-
         // Parse FAI index
         let fai_entries = Self::parse_fai(&fai_data)?;
+
+        // Parse GZI index if provided (for gzipped files)
+        let gzi_entries = if let Some(gzi) = gzi_data
+        {
+            if url.ends_with(".gz")
+            {
+                Some(Self::parse_gzi(&gzi)?)
+            }
+            else
+            {
+                None
+            }
+        }
+        else
+        {
+            None
+        };
+
+        // For gzipped files without GZI, we can't do efficient range fetching
+        if url.ends_with(".gz") && gzi_entries.is_none()
+        {
+            return Err(anyhow::anyhow!(
+                "Gzipped file requires .gzi index for efficient range fetching"
+            ));
+        }
 
         let chromosomes = fai_entries
             .iter()
@@ -179,7 +195,7 @@ impl Genome
         let wasm_indexed = WasmRemoteIndexed {
             data_url: url.to_string(),
             fai_entries,
-            gzi_entries: Vec::new(),  // Not used for uncompressed files
+            gzi_entries: gzi_entries.unwrap_or_default(),
         };
 
         Ok(Self {
@@ -343,6 +359,7 @@ impl Genome
 
     /// Async version of chromosome loading for WASM indexed genomes
     /// Fetches a chromosome from the remote URL using the index data
+    /// Handles both uncompressed and BGZF-compressed FASTA files
     #[cfg(target_arch = "wasm32")]
     pub async fn load_chromosome_async(&mut self, chr_name: &str) -> Result<()>
     {
@@ -352,10 +369,16 @@ impl Genome
             return Ok(());
         }
 
-        let (data_url, fai_entries) = match &self.data
+        let (data_url, fai_entries, gzi_entries, is_gzipped) = match &self.data
         {
             GenomeData::WasmRemoteIndexed(wasm_indexed) => {
-                (wasm_indexed.data_url.clone(), wasm_indexed.fai_entries.clone())
+                let is_gzipped = wasm_indexed.data_url.ends_with(".gz");
+                (
+                    wasm_indexed.data_url.clone(),
+                    wasm_indexed.fai_entries.clone(),
+                    wasm_indexed.gzi_entries.clone(),
+                    is_gzipped,
+                )
             }
             _ => return Ok(()), // Not a WASM indexed genome
         };
@@ -373,12 +396,18 @@ impl Genome
             .find(|e| e.name == chr_name)
             .ok_or_else(|| anyhow::anyhow!("Chromosome '{}' not in FAI index", chr_name))?;
 
-        // Fetch the chromosome data from the remote file
-        let data_end = fai_entry.offset + (length as u64);
-        let raw_data = Self::fetch_url_range(&data_url, fai_entry.offset, data_end).await?;
-
-        // Parse the FASTA sequence (handle newlines)
-        let sequence = Self::parse_fasta_sequence(&raw_data);
+        let sequence = if is_gzipped
+        {
+            // For BGZF-compressed files, use the GZI index to fetch and decompress blocks
+            Self::fetch_bgzf_sequence(&data_url, fai_entry, &gzi_entries, length).await?
+        }
+        else
+        {
+            // For uncompressed files, fetch the range directly
+            let data_end = fai_entry.offset + (length as u64);
+            let raw_data = Self::fetch_url_range(&data_url, fai_entry.offset, data_end).await?;
+            Self::parse_fasta_sequence(&raw_data)
+        };
 
         if sequence.len() != length
         {
@@ -395,6 +424,137 @@ impl Genome
         };
         self.chromosome_cache.insert(chr_name.to_string(), chr);
         Ok(())
+    }
+
+    /// Fetch and decompress a sequence from a BGZF-compressed file using GZI index
+    #[cfg(target_arch = "wasm32")]
+    async fn fetch_bgzf_sequence(
+        url: &str,
+        fai_entry: &FaiEntry,
+        gzi_entries: &[GziEntry],
+        expected_length: usize,
+    ) -> Result<Vec<u8>>
+    {
+        // Calculate the byte range we need in uncompressed space
+        let start_uncompressed = fai_entry.offset;
+        let end_uncompressed = fai_entry.offset + fai_entry.length;
+
+        // Find which GZI blocks overlap with our range
+        let start_block_idx = gzi_entries
+            .partition_point(|e| e.uncompressed_offset < start_uncompressed)
+            .saturating_sub(1);
+
+        let end_block_idx = gzi_entries
+            .partition_point(|e| e.uncompressed_offset < end_uncompressed)
+            .min(gzi_entries.len());
+
+        if start_block_idx >= gzi_entries.len()
+        {
+            return Err(anyhow::anyhow!("No GZI blocks found for sequence"));
+        }
+
+        // Fetch all required blocks (in one combined range request if possible)
+        let first_block = &gzi_entries[start_block_idx];
+        let last_block = &gzi_entries[end_block_idx.saturating_sub(1)];
+
+        // Fetch from first block's compressed offset to end of last block
+        let fetch_start = first_block.compressed_offset;
+        // Estimate the end: last block offset + 64KB (max BGZF block size)
+        let fetch_end = last_block.compressed_offset + (64 * 1024);
+
+        let compressed_data = Self::fetch_url_range(url, fetch_start, fetch_end).await?;
+
+        // Decompress blocks and extract our range
+        let mut result = Vec::with_capacity(expected_length);
+        let mut current_uncompressed_offset = 0u64;
+
+        for block_idx in start_block_idx..end_block_idx
+        {
+            let block = &gzi_entries[block_idx];
+
+            // Calculate where this block is within our fetched data
+            let block_start_in_fetch = (block.compressed_offset - fetch_start) as usize;
+            let block_end_in_fetch = if block_idx + 1 < gzi_entries.len()
+            {
+                let next_block = &gzi_entries[block_idx + 1];
+                (next_block.compressed_offset - fetch_start) as usize
+            }
+            else
+            {
+                compressed_data.len()
+            };
+
+            if block_end_in_fetch > compressed_data.len()
+            {
+                // Need to fetch more data
+                return Err(anyhow::anyhow!("Block extends beyond fetched data"));
+            }
+
+            let block_data = &compressed_data[block_start_in_fetch..block_end_in_fetch];
+
+            // Decompress this BGZF block
+            let decompressed = Self::decompress_bgzf_block(block_data)?;
+
+            // Calculate the offset within this decompressed block
+            let block_start_offset = if block.uncompressed_offset >= start_uncompressed
+            {
+                0
+            }
+            else
+            {
+                (start_uncompressed - block.uncompressed_offset) as usize
+            };
+
+            let block_end_offset = if block.uncompressed_offset + decompressed.len() as u64 <= end_uncompressed
+            {
+                decompressed.len()
+            }
+            else
+            {
+                (end_uncompressed - block.uncompressed_offset) as usize
+            };
+
+            // Extract our range from this block
+            if block_start_offset < decompressed.len() && block_end_offset > block_start_offset
+            {
+                let extract_end = block_end_offset.min(decompressed.len());
+                result.extend_from_slice(&decompressed[block_start_offset..extract_end]);
+            }
+
+            current_uncompressed_offset = block.uncompressed_offset + decompressed.len() as u64;
+        }
+
+        // Parse the FASTA sequence from the decompressed data
+        Ok(Self::parse_fasta_sequence(&result))
+    }
+
+    /// Decompress a single BGZF block
+    /// BGZF blocks are valid gzip streams but with specific compression parameters
+    #[cfg(target_arch = "wasm32")]
+    fn decompress_bgzf_block(data: &[u8]) -> Result<Vec<u8>>
+    {
+        use flate2::read::GzDecoder;
+
+        // Check for BGZF magic bytes (first 2 bytes should be 0x1f 0x8b)
+        if data.len() < 18
+        {
+            return Err(anyhow::anyhow!("BGZF block too small: {}", data.len()));
+        }
+
+        // BGZF-specific: check XFL field at offset 8 (should be 4 for BGZF)
+        // and extra flags at offset 3 (should be 4 for BGZF)
+        if data[0] != 0x1f || data[1] != 0x8b
+        {
+            return Err(anyhow::anyhow!("Invalid gzip header"));
+        }
+
+        // Use flate2 to decompress
+        let mut decoder = GzDecoder::new(data);
+        let mut decompressed = Vec::new();
+        std::io::Read::read_to_end(&mut decoder, &mut decompressed)
+            .map_err(|e| anyhow::anyhow!("Decompression failed: {}", e))?;
+
+        Ok(decompressed)
     }
 
     /// Parse FASTA sequence from raw bytes (removes newlines and header)
