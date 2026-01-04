@@ -130,25 +130,32 @@ wasm_bindgen_futures::spawn_local(async {
 
 The WASM build supports multiple file loading methods:
 
+#### HTTP/HTTPS URLs (Recommended for FASTA files)
+- **FASTA files MUST be loaded from URLs with index files (.fai and .gzi)**
+- Index files enable efficient chromosome loading without downloading entire genomes
+- Files can be hosted on the same origin or via CORS-enabled servers
+- Example: `https://ftp.ensembl.org/pub/release-115/fasta/bos_taurus/dna_index/Bos_taurus.ARS-UCD2.0.dna.toplevel.fa.gz`
+- Required index files:
+  - `.fai` - FASTA index (always required)
+  - `.gzi` - BGZF index (required for .gz files)
+- Useful for loading from public genome databases like Ensembl, NCBI
+
 #### File Dialog (Browser Native)
 - "Browse..." button opens the browser's native file picker
+- **For FASTA files**: Not supported - use URLs instead (prevents browser hang on large files)
+- **For GFF/GTF/BAM/TSV files**: Supported for local file upload
 - Uses HTML5 File API via web-sys bindings
-- File type filtering (.fasta, .gff, .gz extensions)
+- File type filtering (.gff, .bam, .tsv, .gz extensions)
 - Automatic file type detection and loading
-- Most user-friendly method for local files
 
 #### Drag and Drop
 - Users can drag local files directly onto the browser window
+- **For FASTA files**: Not supported - use URLs instead
+- **For GFF/GTF/BAM/TSV files**: Supported for local file upload
 - Files are read using the browser's File API
 - Automatic file type detection based on extension
 - Visual feedback with overlay when hovering with files
 - No need to upload files to a server
-
-#### HTTP/HTTPS URLs
-- Genome files can be loaded from any URL
-- Files can be hosted on the same origin or via CORS-enabled servers
-- Example: `https://example.com/genomes/chr1.fasta.gz`
-- Useful for loading from public genome databases like Ensembl, NCBI
 
 #### File Format Support
 - FASTA files: `.fasta`, `.fa`, `.fna`, `.ffn`, `.faa`, `.frn`
@@ -189,18 +196,64 @@ If loading genome files from external sources, ensure:
 - The hosting server has CORS headers configured
 - `Access-Control-Allow-Origin` permits your domain
 
+## Creating Index Files for FASTA
+
+The web version requires indexed FASTA files for efficient loading. Here's how to create the required index files:
+
+### Using samtools
+
+```bash
+# For uncompressed FASTA
+samtools faidx genome.fa
+
+# For BGZF-compressed FASTA (recommended for web use)
+# 1. Compress with bgzip (NOT regular gzip)
+bgzip genome.fa  # Creates genome.fa.gz
+
+# 2. Create FASTA index
+samtools faidx genome.fa.gz  # Creates genome.fa.gz.fai
+
+# 3. Create BGZF index
+samtools gzi genome.fa.gz    # Creates genome.fa.gz.gzi
+```
+
+### Required Files
+
+After indexing, you need these files:
+- `genome.fa.gz` - BGZF-compressed FASTA
+- `genome.fa.gz.fai` - FASTA index (5-column tab-separated file)
+- `genome.fa.gz.gzi` - BGZF index (binary format)
+
+### Hosting the Files
+
+Upload all three files to a web server with CORS enabled:
+```
+https://example.com/genomes/genome.fa.gz
+https://example.com/genomes/genome.fa.gz.fai
+https://example.com/genomes/genome.fa.gz.gzi
+```
+
+Then use the base URL in UGV:
+```
+https://example.com/genomes/genome.fa.gz
+```
+
+The index files will be automatically fetched.
+
 ## Implemented Features
 
 WASM-specific features already implemented:
 
-1. ✅ **File Dialog**: Native browser file picker with "Browse..." button
-2. ✅ **Drag & Drop**: Drag genome files onto the browser window
-3. ✅ **File API**: Uses browser File API for local file access
-4. ✅ **HTTP Loading**: Load files from URLs (Ensembl, NCBI, etc.)
-5. ✅ **Gzip Support**: Automatic decompression of `.gz` files
-6. ✅ **Visual Feedback**: Overlay when hovering with files
-7. ✅ **Loading Progress**: Real-time progress bar showing file loading and parsing status
-8. ✅ **Touch/Trackpad Gestures**: Two-finger swipe horizontal for panning, vertical for zooming
+1. ✅ **Indexed FASTA Loading**: Efficient chromosome-level loading using .fai and .gzi index files
+2. ✅ **HTTP Loading**: Load files from URLs (Ensembl, NCBI, etc.)
+3. ✅ **File Dialog**: Native browser file picker for GFF/BAM/TSV files
+4. ✅ **Drag & Drop**: Drag GFF/BAM/TSV files onto the browser window
+5. ✅ **File API**: Uses browser File API for local file access (non-FASTA files)
+6. ✅ **Gzip Support**: Automatic decompression of `.gz` files with BGZF indexing
+7. ✅ **Visual Feedback**: Overlay when hovering with files
+8. ✅ **Loading Progress**: Real-time progress bar showing file loading and parsing status
+9. ✅ **Touch/Trackpad Gestures**: Two-finger swipe horizontal for panning, vertical for zooming
+10. ✅ **Chromosome Caching**: Lazy-load and cache chromosomes on demand
 
 ## Future Enhancements
 

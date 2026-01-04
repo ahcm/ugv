@@ -628,32 +628,34 @@ impl GenomeViewer
             // Try to load with indexes for remote URLs
             if path.starts_with("http://") || path.starts_with("https://")
             {
-                // Try to fetch index files - if they exist, use indexed loading
+                // Try to fetch index files - required for WASM to avoid loading huge files
                 match file_loader::fetch_index_files(&path).await
                 {
                     Ok((fai_data, gzi_data)) =>
                     {
                         // Successfully fetched indexes (or at least FAI)
-                        match fasta::Genome::from_url_wasm(&path, fai_data, gzi_data)
-                        {
-                            Ok(genome) => return Ok(genome),
-                            Err(_) =>
-                            {
-                                // Indexed loading failed, fall back to full loading
-                            }
-                        }
+                        fasta::Genome::from_url_wasm(&path, fai_data, gzi_data)
                     }
-                    Err(_) =>
+                    Err(e) =>
                     {
-                        // Index files not available, proceed with full loading
+                        // Index files not available - required for WASM
+                        Err(anyhow::anyhow!(
+                            "Index files (.fai and .gzi) are required for loading FASTA files in the web version. \
+                            Please ensure {}.fai exists (and {}.gzi for gzipped files). \
+                            Error: {}",
+                            path, path, e
+                        ))
                     }
                 }
             }
-
-            // Fall back to full file loading
-            let data = file_loader::load_file_async(&path).await?;
-            let is_gzipped = path.ends_with(".gz");
-            fasta::Genome::from_bytes(data, is_gzipped)
+            else
+            {
+                // Local file path in WASM - not supported
+                Err(anyhow::anyhow!(
+                    "In the web version, only HTTP/HTTPS URLs are supported. \
+                    Please use a URL to a FASTA file with index files (.fai and .gzi)."
+                ))
+            }
         });
 
         *self.genome_promise.lock() = Some(promise);
@@ -663,28 +665,17 @@ impl GenomeViewer
     fn load_fasta_from_file(&mut self, file: web_sys::File)
     {
         let file_name = file.name();
-        let file_size = file.size() as usize;
         self.fasta_file_name = file_name.clone();
-        self.status_message = format!("Loading FASTA from {}...", file_name);
-        self.loading_progress = Some(LoadingProgress {
-            description: "Reading FASTA file...".to_string(),
-            bytes_loaded: 0,
-            total_bytes: Some(file_size),
-        });
 
-        let is_gzipped = file_name.ends_with(".gz");
-
-        let promise = poll_promise::Promise::spawn_local(async move {
-            use gloo_file::futures::read_as_bytes;
-
-            let data = read_as_bytes(&file.into())
-                .await
-                .map_err(|e| anyhow::anyhow!("Failed to read file: {:?}", e))?;
-
-            fasta::Genome::from_bytes(data, is_gzipped)
-        });
-
-        *self.genome_promise.lock() = Some(promise);
+        // In WASM, we require indexed FASTA files loaded from URLs
+        // Loading large FASTA files directly would cause the browser to hang
+        self.status_message = format!(
+            "Local FASTA file upload is not supported in the web version. \
+            Large genome files would cause the browser to hang. \
+            Please use a URL to a FASTA file with index files (.fai and .gzi). \
+            Example: https://ftp.ensembl.org/pub/release-115/fasta/bos_taurus/dna_index/Bos_taurus.ARS-UCD2.0.dna.toplevel.fa.gz"
+        );
+        self.loading_progress = None;
     }
 
     #[cfg(target_arch = "wasm32")]
