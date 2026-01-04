@@ -106,3 +106,95 @@ where
 
     Ok(bytes)
 }
+
+/// Check if index files (.fai and .gzi) exist for a given FASTA URL
+/// Returns (fai_url, gzi_url) if both exist, None otherwise
+#[cfg(target_arch = "wasm32")]
+pub async fn check_index_files(fasta_url: &str) -> Option<(String, String)>
+{
+    let fai_url = format!("{}.fai", fasta_url);
+    let gzi_url = format!("{}.gzi", fasta_url);
+
+    // Check if FAI exists
+    let fai_exists = check_url_exists(&fai_url).await;
+    if !fai_exists
+    {
+        return None;
+    }
+
+    // Check if GZI exists (only needed for gzipped files)
+    if fasta_url.ends_with(".gz")
+    {
+        let gzi_exists = check_url_exists(&gzi_url).await;
+        if !gzi_exists
+        {
+            return None;
+        }
+    }
+
+    Some((fai_url, gzi_url))
+}
+
+/// Check if a URL returns a successful response (HEAD or GET request)
+#[cfg(target_arch = "wasm32")]
+async fn check_url_exists(url: &str) -> bool
+{
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen_futures::JsFuture;
+    use web_sys::{RequestInit, RequestMode, Response};
+
+    let window = match web_sys::window()
+    {
+        Some(w) => w,
+        None => return false,
+    };
+
+    // Try HEAD first (lighter), fall back to GET
+    let mut init = RequestInit::new();
+    init.set_method("HEAD");
+    init.set_mode(RequestMode::Cors);
+
+    let response_promise: js_sys::Promise = window.fetch_with_str_and_init(url, &init).into();
+    let response_value = match JsFuture::from(response_promise).await
+    {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+
+    if let Ok(response) = response_value.dyn_into::<Response>()
+    {
+        response.ok()
+    }
+    else
+    {
+        false
+    }
+}
+
+/// Fetch both index files for a FASTA URL
+/// Returns (fai_data, gzi_data) or an error if either fails
+#[cfg(target_arch = "wasm32")]
+pub async fn fetch_index_files(fasta_url: &str) -> Result<(Vec<u8>, Option<Vec<u8>>)>
+{
+    let fai_url = format!("{}.fai", fasta_url);
+    let gzi_url = format!("{}.gzi", fasta_url);
+
+    // Fetch FAI (required)
+    let fai_data = load_file_async(&fai_url).await?;
+
+    // Fetch GZI (only for gzipped files, optional but recommended)
+    let gzi_data = if fasta_url.ends_with(".gz")
+    {
+        match load_file_async(&gzi_url).await
+        {
+            Ok(data) => Some(data),
+            Err(_) => None,
+        }
+    }
+    else
+    {
+        None
+    };
+
+    Ok((fai_data, gzi_data))
+}

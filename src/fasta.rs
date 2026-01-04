@@ -14,6 +14,37 @@ use fastx::remote::RemoteReader;
 #[cfg(not(target_arch = "wasm32"))]
 const DEFAULT_REMOTE_BLOCK_SIZE: u64 = 64 * 1024;
 
+/// FAI index entry for a sequence
+#[derive(Debug, Clone)]
+pub struct FaiEntry
+{
+    pub name: String,
+    pub length: u64,
+    pub offset: u64,
+    pub line_bases: u64,
+    pub line_bytes: u64,
+}
+
+/// GZip index entry for a BGZF block
+#[derive(Debug, Clone)]
+pub struct GziEntry
+{
+    pub compressed_offset: u64,
+    pub uncompressed_offset: u64,
+    pub compressed_size: u64,
+    pub uncompressed_size: u64,
+}
+
+/// WASM remote indexed FASTA data (stores URLs and index data for lazy loading)
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone)]
+pub struct WasmRemoteIndexed
+{
+    pub data_url: String,
+    pub fai_entries: Vec<FaiEntry>,
+    pub gzi_entries: Vec<GziEntry>,
+}
+
 /// Chromosome metadata (name and length)
 #[derive(Debug, Clone)]
 pub struct ChromosomeInfo
@@ -41,6 +72,9 @@ pub enum GenomeData
     /// Remote indexed reader (HTTP/HTTPS with range requests) - native only
     #[cfg(not(target_arch = "wasm32"))]
     IndexedRemote(IndexedFastXReader<RemoteReader>),
+    /// WASM remote indexed FASTA (stores URLs and index data for lazy loading via fetch)
+    #[cfg(target_arch = "wasm32")]
+    WasmRemoteIndexed(WasmRemoteIndexed),
 }
 
 /// Genome wrapper with chromosome metadata and optional lazy loading
@@ -109,6 +143,291 @@ impl Genome
         };
 
         Self::parse_fasta_full(reader)
+    }
+
+    /// Load genome from a URL for WASM, checking for index files
+    /// This function is async-compatible and returns a genome that can fetch ranges
+    #[cfg(target_arch = "wasm32")]
+    pub fn from_url_wasm(url: &str, fai_data: Vec<u8>, gzi_data: Option<Vec<u8>>) -> Result<Self>
+    {
+        // Parse FAI index
+        let fai_entries = Self::parse_fai(&fai_data)?;
+
+        // Parse GZI index if provided
+        let gzi_entries = if let Some(gzi) = gzi_data
+        {
+            Some(Self::parse_gzi(&gzi)?)
+        }
+        else
+        {
+            None
+        };
+
+        // If we don't have GZI, we can't do efficient range fetching on gzipped files
+        // Fall back to full loading
+        if url.ends_with(".gz") && gzi_entries.is_none()
+        {
+            return Err(anyhow::anyhow!(
+                "GZipped file requires .gzi index for efficient range fetching"
+            ));
+        }
+
+        let chromosomes = fai_entries
+            .iter()
+            .map(|entry| {
+                (
+                    entry.name.clone(),
+                    ChromosomeInfo {
+                        name: entry.name.clone(),
+                        length: entry.length as usize,
+                    },
+                )
+            })
+            .collect();
+
+        let wasm_indexed = WasmRemoteIndexed {
+            data_url: url.to_string(),
+            fai_entries,
+            gzi_entries: gzi_entries.unwrap_or_default(),
+        };
+
+        Ok(Self {
+            chromosomes,
+            data: GenomeData::WasmRemoteIndexed(wasm_indexed),
+            chromosome_cache: HashMap::new(),
+        })
+    }
+
+    /// Parse FAI (FASTA index) file format
+    /// Format: sequence_name length offset line_bases line_bytes
+    #[cfg(target_arch = "wasm32")]
+    fn parse_fai(data: &[u8]) -> Result<Vec<FaiEntry>>
+    {
+        let text = std::str::from_utf8(data)
+            .with_context(|| "FAI data is not valid UTF-8")?;
+
+        let mut entries = Vec::new();
+        for line in text.lines()
+        {
+            let line = line.trim();
+            if line.is_empty()
+            {
+                continue;
+            }
+            let parts: Vec<&str> = line.split('\t').collect();
+            if parts.len() != 5
+            {
+                return Err(anyhow::anyhow!("Invalid FAI line: {}", line));
+            }
+
+            entries.push(FaiEntry {
+                name: parts[0].to_string(),
+                length: parts[1].parse()
+                    .with_context(|| format!("Invalid length in FAI: {}", parts[1]))?,
+                offset: parts[2].parse()
+                    .with_context(|| format!("Invalid offset in FAI: {}", parts[2]))?,
+                line_bases: parts[3].parse()
+                    .with_context(|| format!("Invalid line_bases in FAI: {}", parts[3]))?,
+                line_bytes: parts[4].parse()
+                    .with_context(|| format!("Invalid line_bytes in FAI: {}", parts[4]))?,
+            });
+        }
+        Ok(entries)
+    }
+
+    /// Parse GZI (GZIP index) file format
+    /// Binary format: 8 bytes per entry (compressed_offset, uncompressed_offset)
+    #[cfg(target_arch = "wasm32")]
+    fn parse_gzi(data: &[u8]) -> Result<Vec<GziEntry>>
+    {
+        if data.len() % 16 != 0
+        {
+            return Err(anyhow::anyhow!(
+                "Invalid GZI file: size {} is not a multiple of 16", data.len()
+            ));
+        }
+
+        let mut entries = Vec::new();
+        let mut i = 0;
+        while i + 16 <= data.len()
+        {
+            let compressed_offset = u64::from_le_bytes(
+                data[i..i + 8].try_into().unwrap()
+            );
+            let uncompressed_offset = u64::from_le_bytes(
+                data[i + 8..i + 16].try_into().unwrap()
+            );
+
+            // Calculate sizes (difference from next entry, or end of file)
+            let (compressed_size, uncompressed_size) = if i + 32 <= data.len()
+            {
+                let next_compressed = u64::from_le_bytes(
+                    data[i + 16..i + 24].try_into().unwrap()
+                );
+                let next_uncompressed = u64::from_le_bytes(
+                    data[i + 24..i + 32].try_into().unwrap()
+                );
+                (next_compressed - compressed_offset, next_uncompressed - uncompressed_offset)
+            }
+            else
+            {
+                // Last entry - sizes are unknown (will be determined by decompression)
+                (0, 0)
+            };
+
+            entries.push(GziEntry {
+                compressed_offset,
+                uncompressed_offset,
+                compressed_size,
+                uncompressed_size,
+            });
+            i += 16;
+        }
+        Ok(entries)
+    }
+
+    /// Fetch a byte range from a URL using HTTP range request
+    /// This is used internally by WASM indexed genome
+    #[cfg(target_arch = "wasm32")]
+    pub async fn fetch_url_range(url: &str, start: u64, end: u64) -> Result<Vec<u8>>
+    {
+        use wasm_bindgen::JsCast;
+        use wasm_bindgen_futures::JsFuture;
+        use web_sys::{RequestInit, RequestMode, Response};
+
+        let window = web_sys::window().ok_or_else(|| anyhow::anyhow!("No window object"))?;
+
+        // Build URL with range parameter (since we can't easily set Range header via fetch API)
+        // We'll use the full fetch and let the server handle the range
+        let range_header = format!("bytes={}-{}", start, end.saturating_sub(1));
+
+        let mut init = RequestInit::new();
+        init.set_method("GET");
+        init.set_mode(RequestMode::Cors);
+
+        // Set Range header using the headers() method
+        let headers_val = js_sys::Object::new();
+        js_sys::Reflect::set(&headers_val, &"Range".into(), &range_header.into()).unwrap();
+        init.set_headers(&headers_val.into());
+
+        let response_promise: js_sys::Promise = window.fetch_with_str_and_init(url, &init).into();
+        let response_value = JsFuture::from(response_promise)
+            .await
+            .map_err(|e| anyhow::anyhow!("Fetch failed: {:?}", e))?;
+
+        let response: Response = response_value
+            .dyn_into()
+            .map_err(|_| anyhow::anyhow!("Response cast failed"))?;
+
+        // Accept both 200 and 206 (Partial Content)
+        let status = response.status();
+        if status != 200 && status != 206
+        {
+            return Err(anyhow::anyhow!(
+                "HTTP error {}: {}", status, response.status_text()
+            ));
+        }
+
+        let array_buffer_promise = response
+            .array_buffer()
+            .map_err(|_| anyhow::anyhow!("Failed to get array buffer"))?;
+
+        let array_buffer_value = JsFuture::from(array_buffer_promise)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to read array buffer: {:?}", e))?;
+
+        let uint8_array = js_sys::Uint8Array::new(&array_buffer_value);
+        Ok(uint8_array.to_vec())
+    }
+
+    /// Async version of chromosome loading for WASM indexed genomes
+    /// Fetches a chromosome from the remote URL using the index data
+    #[cfg(target_arch = "wasm32")]
+    pub async fn load_chromosome_async(&mut self, chr_name: &str) -> Result<()>
+    {
+        // If already cached, return immediately
+        if self.chromosome_cache.contains_key(chr_name)
+        {
+            return Ok(());
+        }
+
+        let (data_url, fai_entries) = match &self.data
+        {
+            GenomeData::WasmRemoteIndexed(wasm_indexed) => {
+                (wasm_indexed.data_url.clone(), wasm_indexed.fai_entries.clone())
+            }
+            _ => return Ok(()), // Not a WASM indexed genome
+        };
+
+        let info = self
+            .chromosomes
+            .get(chr_name)
+            .ok_or_else(|| anyhow::anyhow!("Chromosome '{}' not found", chr_name))?;
+
+        let length = info.length;
+
+        // Find the FAI entry for this chromosome
+        let fai_entry = fai_entries
+            .iter()
+            .find(|e| e.name == chr_name)
+            .ok_or_else(|| anyhow::anyhow!("Chromosome '{}' not in FAI index", chr_name))?;
+
+        // Fetch the chromosome data from the remote file
+        let data_end = fai_entry.offset + (length as u64);
+        let raw_data = Self::fetch_url_range(&data_url, fai_entry.offset, data_end).await?;
+
+        // Parse the FASTA sequence (handle newlines)
+        let sequence = Self::parse_fasta_sequence(&raw_data);
+
+        if sequence.len() != length
+        {
+            return Err(anyhow::anyhow!(
+                "Sequence length mismatch for '{}': expected {}, got {}",
+                chr_name, length, sequence.len()
+            ));
+        }
+
+        let chr = Chromosome {
+            name: chr_name.to_string(),
+            length,
+            sequence,
+        };
+        self.chromosome_cache.insert(chr_name.to_string(), chr);
+        Ok(())
+    }
+
+    /// Parse FASTA sequence from raw bytes (removes newlines and header)
+    #[cfg(target_arch = "wasm32")]
+    fn parse_fasta_sequence(data: &[u8]) -> Vec<u8>
+    {
+        let mut result = Vec::new();
+        let mut in_sequence = false;
+
+        for line in data.split(|&b| b == b'\n')
+        {
+            if line.is_empty()
+            {
+                continue;
+            }
+            // Skip header line
+            if line[0] == b'>'
+            {
+                in_sequence = true;
+                continue;
+            }
+            // Add sequence bytes, converting to uppercase
+            if in_sequence
+            {
+                for &byte in line
+                {
+                    if byte != b'\r' && byte != b'\n' && !byte.is_ascii_whitespace()
+                    {
+                        result.push(byte.to_ascii_uppercase());
+                    }
+                }
+            }
+        }
+        result
     }
 
     /// Load genome from a local file path
@@ -362,6 +681,15 @@ impl Genome
                 }
                 Ok(())
             }
+            #[cfg(target_arch = "wasm32")]
+            GenomeData::WasmRemoteIndexed(_) =>
+            {
+                // For WASM, chromosome loading is async and must be handled separately
+                // Use ensure_chromosome_loaded_async instead
+                Err(anyhow::anyhow!(
+                    "WASM indexed genome requires async loading. Use load_chromosome_wasm_async() instead."
+                ))
+            }
         }
     }
 
@@ -445,6 +773,22 @@ impl Genome
                     })?;
                 // Convert to uppercase
                 Ok(data.iter().map(|&b| b.to_ascii_uppercase()).collect())
+            }
+            #[cfg(target_arch = "wasm32")]
+            GenomeData::WasmRemoteIndexed(_) =>
+            {
+                // For WASM indexed genomes, check cache first
+                if let Some(cached) = self.chromosome_cache.get(chr_name)
+                {
+                    let start = start.min(cached.length);
+                    let end = end.min(cached.length);
+                    return Ok(cached.sequence[start..end].to_vec());
+                }
+                // Chromosome not loaded - needs async loading
+                Err(anyhow::anyhow!(
+                    "Chromosome '{}' not loaded. Call load_chromosome_async() first.",
+                    chr_name
+                ))
             }
         }
     }
