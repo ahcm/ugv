@@ -1674,6 +1674,13 @@ impl eframe::App for GenomeViewer
                                             .unwrap_or(&self.fasta_path)
                                     );
                                 }
+
+                                ui.label("URL:");
+                                ui.add_sized([300.0, 20.0], egui::TextEdit::singleline(&mut self.fasta_path).hint_text("https://..."));
+                                if ui.button("Load URL").clicked()
+                                {
+                                    self.load_fasta();
+                                }
                             }
 
                             #[cfg(target_arch = "wasm32")]
@@ -1725,6 +1732,13 @@ impl eframe::App for GenomeViewer
                                             .unwrap_or(&self.gff_path)
                                     );
                                 }
+
+                                ui.label("URL:");
+                                ui.add_sized([300.0, 20.0], egui::TextEdit::singleline(&mut self.gff_path).hint_text("https://..."));
+                                if ui.button("Load URL").clicked()
+                                {
+                                    self.load_gff();
+                                }
                             }
 
                             #[cfg(target_arch = "wasm32")]
@@ -1774,6 +1788,13 @@ impl eframe::App for GenomeViewer
                                             .and_then(|n| n.to_str())
                                             .unwrap_or(&self.bam_path)
                                     );
+                                }
+
+                                ui.label("URL:");
+                                ui.add_sized([300.0, 20.0], egui::TextEdit::singleline(&mut self.bam_path).hint_text("https://..."));
+                                if ui.button("Load URL").clicked()
+                                {
+                                    self.load_bam();
                                 }
                             }
 
