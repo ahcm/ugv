@@ -404,7 +404,12 @@ impl Genome
         else
         {
             // For uncompressed files, fetch the range directly
-            let data_end = fai_entry.offset + (length as u64);
+            // Calculate bytes needed including newline characters
+            // Number of full lines needed to hold all bases
+            let num_lines = (fai_entry.length + fai_entry.line_bases - 1) / fai_entry.line_bases;
+            // Total bytes = bases + newlines (one per line)
+            let bytes_needed = fai_entry.length + num_lines;
+            let data_end = fai_entry.offset + bytes_needed;
             let raw_data = Self::fetch_url_range(&data_url, fai_entry.offset, data_end).await?;
             Self::parse_fasta_sequence(&raw_data)
         };
