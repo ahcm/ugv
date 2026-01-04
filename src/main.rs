@@ -2250,10 +2250,16 @@ impl eframe::App for GenomeViewer
             }
 
             // Render genome using track configuration
-            if let (Some(ref genome), Some(ref chr_name)) =
-                (&self.genome, &self.selected_chromosome)
+            if let (Some(ref mut genome), Some(ref chr_name)) =
+                (&mut self.genome, &self.selected_chromosome)
             {
-                if let Some(chr) = genome.chromosomes.get(chr_name)
+                // Ensure chromosome is loaded (for indexed genomes)
+                if let Err(e) = genome.ensure_chromosome_loaded(chr_name)
+                {
+                    self.status_message = format!("Error loading chromosome: {}", e);
+                }
+
+                if let Some(chr) = genome.get_chromosome(chr_name)
                 {
                     // Query BAM region once if needed
                     let bam_track = if let Some(ref mut alignments) = self.alignments

@@ -16,7 +16,7 @@ byteorder = "1.5"
 poll-promise = { version = "0.3", features = ["web"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-fastx = {path="../fastx"}
+fastx = {version="0.6.0", features = ["url"]}
 
 # BAM/SAM file support (pure Rust for WASM compatibility)
 # Using main noodles crate to ensure version compatibility
