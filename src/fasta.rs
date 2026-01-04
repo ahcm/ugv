@@ -236,42 +236,53 @@ impl Genome
     }
 
     /// Parse GZI (GZIP index) file format
-    /// Binary format: 8 bytes per entry (compressed_offset, uncompressed_offset)
+    /// Binary format: 8 bytes (number of offsets) + N * 16 bytes (offset entries)
+    /// Each entry: 8 bytes compressed offset + 8 bytes uncompressed offset
     #[cfg(target_arch = "wasm32")]
     fn parse_gzi(data: &[u8]) -> Result<Vec<GziEntry>>
     {
-        if data.len() % 16 != 0
+        if data.len() < 8
+        {
+            return Err(anyhow::anyhow!("Invalid GZI file: too small"));
+        }
+
+        // First 8 bytes: number of offsets (little-endian u64)
+        let num_offsets = u64::from_le_bytes(
+            data[0..8].try_into().unwrap()
+        ) as usize;
+
+        let expected_size = 8 + (num_offsets * 16);
+        if data.len() < expected_size
         {
             return Err(anyhow::anyhow!(
-                "Invalid GZI file: size {} is not a multiple of 16", data.len()
+                "Invalid GZI file: expected {} bytes, got {}", expected_size, data.len()
             ));
         }
 
         let mut entries = Vec::new();
-        let mut i = 0;
-        while i + 16 <= data.len()
+        for i in 0..num_offsets
         {
+            let offset = 8 + (i * 16);
             let compressed_offset = u64::from_le_bytes(
-                data[i..i + 8].try_into().unwrap()
+                data[offset..offset + 8].try_into().unwrap()
             );
             let uncompressed_offset = u64::from_le_bytes(
-                data[i + 8..i + 16].try_into().unwrap()
+                data[offset + 8..offset + 16].try_into().unwrap()
             );
 
-            // Calculate sizes (difference from next entry, or end of file)
-            let (compressed_size, uncompressed_size) = if i + 32 <= data.len()
+            // Calculate sizes (difference from next entry, or 0 for last)
+            let (compressed_size, uncompressed_size) = if i + 1 < num_offsets
             {
                 let next_compressed = u64::from_le_bytes(
-                    data[i + 16..i + 24].try_into().unwrap()
+                    data[offset + 16..offset + 24].try_into().unwrap()
                 );
                 let next_uncompressed = u64::from_le_bytes(
-                    data[i + 24..i + 32].try_into().unwrap()
+                    data[offset + 24..offset + 32].try_into().unwrap()
                 );
                 (next_compressed - compressed_offset, next_uncompressed - uncompressed_offset)
             }
             else
             {
-                // Last entry - sizes are unknown (will be determined by decompression)
                 (0, 0)
             };
 
@@ -281,7 +292,6 @@ impl Genome
                 compressed_size,
                 uncompressed_size,
             });
-            i += 16;
         }
         Ok(entries)
     }
