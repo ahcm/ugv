@@ -65,7 +65,7 @@ pub fn draw_empty_track(
 }
 
 // Make these functions public so they can be called from main.rs
-pub fn draw_ruler(painter: &Painter, rect: Rect, viewport: &Viewport, y_offset: f32, height: f32) -> f32
+pub fn draw_ruler(painter: &Painter, rect: Rect, viewport: &Viewport, y_offset: f32, height: f32, chromosome_name: &str) -> f32
 {
     let ruler_rect = Rect::from_min_size(
         Pos2::new(rect.left(), y_offset),
@@ -74,6 +74,15 @@ pub fn draw_ruler(painter: &Painter, rect: Rect, viewport: &Viewport, y_offset: 
 
     // Background
     painter.rect_filled(ruler_rect, 0.0, Color32::from_gray(240));
+
+    // Draw chromosome name on the left
+    painter.text(
+        Pos2::new(rect.left() + 10.0, ruler_rect.top() + height / 2.0),
+        egui::Align2::LEFT_CENTER,
+        chromosome_name,
+        egui::FontId::proportional(14.0),
+        Color32::from_rgb(60, 60, 100),
+    );
 
     // Draw tick marks
     let width = viewport.width();

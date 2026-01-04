@@ -2343,6 +2343,7 @@ impl eframe::App for GenomeViewer
                                     &self.viewport,
                                     y_offset,
                                     config.height,
+                                    chr_name,
                                 );
                                 y_offset += TRACK_SPACING;
                             }
