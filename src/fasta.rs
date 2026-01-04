@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use fastx::indexed::IndexedFastXReader;
-use fastx::remote::RemoteReader;
 use fastx::FastX::{fasta_iter, reader_from_path, FastXRead};
 use flate2::read::MultiGzDecoder;
 use std::collections::HashMap;
@@ -8,7 +7,11 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Cursor};
 use std::path::Path;
 
+#[cfg(not(target_arch = "wasm32"))]
+use fastx::remote::RemoteReader;
+
 /// Default block size for remote file caching (64KB as per fastx defaults)
+#[cfg(not(target_arch = "wasm32"))]
 const DEFAULT_REMOTE_BLOCK_SIZE: u64 = 64 * 1024;
 
 /// Chromosome metadata (name and length)
@@ -35,7 +38,8 @@ pub enum GenomeData
     Full(HashMap<String, Chromosome>),
     /// Indexed reader for lazy loading (bgzip with .fai + .gzi)
     IndexedLocal(IndexedFastXReader<File>),
-    /// Remote indexed reader (HTTP/HTTPS with range requests)
+    /// Remote indexed reader (HTTP/HTTPS with range requests) - native only
+    #[cfg(not(target_arch = "wasm32"))]
     IndexedRemote(IndexedFastXReader<RemoteReader>),
 }
 
@@ -332,6 +336,7 @@ impl Genome
                 }
                 Ok(())
             }
+            #[cfg(not(target_arch = "wasm32"))]
             GenomeData::IndexedRemote(reader) =>
             {
                 if !self.chromosome_cache.contains_key(chr_name)
@@ -421,6 +426,7 @@ impl Genome
                 // Convert to uppercase
                 Ok(data.iter().map(|&b| b.to_ascii_uppercase()).collect())
             }
+            #[cfg(not(target_arch = "wasm32"))]
             GenomeData::IndexedRemote(reader) =>
             {
                 // Check cache first

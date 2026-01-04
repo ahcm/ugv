@@ -3,6 +3,10 @@ name = "ugv"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = ["native"]
+native = ["fastx/url"]
+
 [dependencies]
 eframe = "0.29"
 egui = "0.29"
@@ -16,7 +20,8 @@ byteorder = "1.5"
 poll-promise = { version = "0.3", features = ["web"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-fastx = {version="0.6.0", features = ["url"]}
+# fastx with optional URL feature (only enabled on native)
+fastx = { version = "0.6.0", default-features = false }
 
 # BAM/SAM file support (pure Rust for WASM compatibility)
 # Using main noodles crate to ensure version compatibility
@@ -33,3 +38,4 @@ web-sys = { version = "0.3", features = ["Request", "RequestInit", "RequestMode"
 log = "0.4"
 gloo-net = "0.6"
 gloo-file = { version = "0.3", features = ["futures"] }
+getrandom = { version = "0.2", features = ["js"] }

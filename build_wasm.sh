@@ -3,8 +3,8 @@ set -e
 
 echo "Building UGV for WebAssembly..."
 
-# Build for wasm32
-cargo build --release --target wasm32-unknown-unknown
+# Build for wasm32 (without default features to exclude native-only dependencies)
+cargo build --release --target wasm32-unknown-unknown --no-default-features
 
 # Install wasm-bindgen-cli if not already installed
 if ! command -v wasm-bindgen &> /dev/null; then
