@@ -23,6 +23,47 @@ const VARIANT_TRACK_HEIGHT: f32 = 30.0;
 // TSV track constants
 const TSV_TRACK_HEIGHT: f32 = 100.0;
 
+// Helper function to draw an empty track placeholder
+pub fn draw_empty_track(
+    painter: &Painter,
+    rect: Rect,
+    y_offset: f32,
+    height: f32,
+    label: &str,
+) -> f32
+{
+    let track_rect = Rect::from_min_size(
+        Pos2::new(rect.left(), y_offset),
+        Vec2::new(rect.width(), height),
+    );
+
+    // Background
+    painter.rect_filled(track_rect, 0.0, Color32::from_gray(250));
+
+    // Border
+    painter.rect_stroke(track_rect, 0.0, Stroke::new(1.0, Color32::from_gray(220)));
+
+    // Draw label
+    painter.text(
+        Pos2::new(rect.left() + 5.0, y_offset + 5.0),
+        egui::Align2::LEFT_TOP,
+        label,
+        FontId::proportional(12.0),
+        Color32::from_gray(120),
+    );
+
+    // Draw "No data" message in center
+    painter.text(
+        Pos2::new(rect.center().x, y_offset + height / 2.0),
+        egui::Align2::CENTER_CENTER,
+        "No data in viewport",
+        FontId::proportional(11.0),
+        Color32::from_gray(150),
+    );
+
+    track_rect.bottom()
+}
+
 // Make these functions public so they can be called from main.rs
 pub fn draw_ruler(painter: &Painter, rect: Rect, viewport: &Viewport, y_offset: f32, height: f32) -> f32
 {
@@ -424,7 +465,7 @@ pub fn draw_features(
 
     if feature_indices.is_empty()
     {
-        return y_offset;
+        return draw_empty_track(painter, rect, y_offset, height, "Features");
     }
 
     // Group features by type for different tracks

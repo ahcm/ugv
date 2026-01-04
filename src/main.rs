@@ -2379,8 +2379,18 @@ impl eframe::App for GenomeViewer
                                         y_offset,
                                         config.height,
                                     );
-                                    y_offset += TRACK_SPACING;
                                 }
+                                else
+                                {
+                                    y_offset = renderer::draw_empty_track(
+                                        &painter,
+                                        response.rect,
+                                        y_offset,
+                                        config.height,
+                                        "Sequence (zoom in to view)",
+                                    );
+                                }
+                                y_offset += TRACK_SPACING;
                             }
                             TrackType::AminoAcids =>
                             {
@@ -2394,8 +2404,18 @@ impl eframe::App for GenomeViewer
                                         y_offset,
                                         config.height,
                                     );
-                                    y_offset += TRACK_SPACING;
                                 }
+                                else
+                                {
+                                    y_offset = renderer::draw_empty_track(
+                                        &painter,
+                                        response.rect,
+                                        y_offset,
+                                        config.height,
+                                        "Amino Acids (zoom in to view)",
+                                    );
+                                }
+                                y_offset += TRACK_SPACING;
                             }
                             TrackType::Features =>
                             {
@@ -2411,8 +2431,18 @@ impl eframe::App for GenomeViewer
                                         y_offset,
                                         config.height,
                                     );
-                                    y_offset += TRACK_SPACING;
                                 }
+                                else
+                                {
+                                    y_offset = renderer::draw_empty_track(
+                                        &painter,
+                                        response.rect,
+                                        y_offset,
+                                        config.height,
+                                        "Features (load GFF file)",
+                                    );
+                                }
+                                y_offset += TRACK_SPACING;
                             }
                             TrackType::Coverage =>
                             {
@@ -2426,8 +2456,18 @@ impl eframe::App for GenomeViewer
                                         y_offset,
                                         config.height,
                                     );
-                                    y_offset += TRACK_SPACING;
                                 }
+                                else
+                                {
+                                    y_offset = renderer::draw_empty_track(
+                                        &painter,
+                                        response.rect,
+                                        y_offset,
+                                        config.height,
+                                        "Coverage (load BAM file)",
+                                    );
+                                }
+                                y_offset += TRACK_SPACING;
                             }
                             TrackType::Alignments =>
                             {
@@ -2442,8 +2482,18 @@ impl eframe::App for GenomeViewer
                                         config.height,
                                         self.max_reads_display,
                                     );
-                                    y_offset += TRACK_SPACING;
                                 }
+                                else
+                                {
+                                    y_offset = renderer::draw_empty_track(
+                                        &painter,
+                                        response.rect,
+                                        y_offset,
+                                        config.height,
+                                        "Alignments (load BAM file)",
+                                    );
+                                }
+                                y_offset += TRACK_SPACING;
                             }
                             TrackType::Variants =>
                             {
@@ -2457,8 +2507,18 @@ impl eframe::App for GenomeViewer
                                         y_offset,
                                         config.height,
                                     );
-                                    y_offset += TRACK_SPACING;
                                 }
+                                else
+                                {
+                                    y_offset = renderer::draw_empty_track(
+                                        &painter,
+                                        response.rect,
+                                        y_offset,
+                                        config.height,
+                                        "Variants (load BAM file)",
+                                    );
+                                }
+                                y_offset += TRACK_SPACING;
                             }
                             TrackType::Methylation =>
                             {
@@ -2474,9 +2534,29 @@ impl eframe::App for GenomeViewer
                                             y_offset,
                                             config.height,
                                         );
-                                        y_offset += TRACK_SPACING;
+                                    }
+                                    else
+                                    {
+                                        y_offset = renderer::draw_empty_track(
+                                            &painter,
+                                            response.rect,
+                                            y_offset,
+                                            config.height,
+                                            "Methylation (no data)",
+                                        );
                                     }
                                 }
+                                else
+                                {
+                                    y_offset = renderer::draw_empty_track(
+                                        &painter,
+                                        response.rect,
+                                        y_offset,
+                                        config.height,
+                                        "Methylation (load BAM file)",
+                                    );
+                                }
+                                y_offset += TRACK_SPACING;
                             }
                             TrackType::CustomTsv =>
                             {
@@ -2490,8 +2570,18 @@ impl eframe::App for GenomeViewer
                                         y_offset,
                                         config.height,
                                     );
-                                    y_offset += TRACK_SPACING;
                                 }
+                                else
+                                {
+                                    y_offset = renderer::draw_empty_track(
+                                        &painter,
+                                        response.rect,
+                                        y_offset,
+                                        config.height,
+                                        "Custom Track (load TSV file)",
+                                    );
+                                }
+                                y_offset += TRACK_SPACING;
                             }
                         }
                     }
