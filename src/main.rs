@@ -619,21 +619,34 @@ impl GenomeViewer
         let path = self.fasta_path.clone();
         self.status_message = format!("Loading FASTA from {}...", path);
         self.loading_progress = Some(LoadingProgress {
-            description: "Checking for index files...".to_string(),
+            description: "Downloading FASTA file...".to_string(),
             bytes_loaded: 0,
             total_bytes: None,
         });
 
         let promise = poll_promise::Promise::spawn_local(async move {
-            // Try to load with indexes first (for remote URLs)
+            // Try to load with indexes for remote URLs
             if path.starts_with("http://") || path.starts_with("https://")
             {
-                // Check for index files
-                if let Some((fai_url, gzi_url)) = file_loader::check_index_files(&path).await
+                // Try to fetch index files - if they exist, use indexed loading
+                match file_loader::fetch_index_files(&path).await
                 {
-                    // Index files exist - use indexed loading
-                    let (fai_data, gzi_data) = file_loader::fetch_index_files(&path).await?;
-                    return fasta::Genome::from_url_wasm(&path, fai_data, gzi_data);
+                    Ok((fai_data, gzi_data)) =>
+                    {
+                        // Successfully fetched indexes (or at least FAI)
+                        match fasta::Genome::from_url_wasm(&path, fai_data, gzi_data)
+                        {
+                            Ok(genome) => return Ok(genome),
+                            Err(_) =>
+                            {
+                                // Indexed loading failed, fall back to full loading
+                            }
+                        }
+                    }
+                    Err(_) =>
+                    {
+                        // Index files not available, proceed with full loading
+                    }
                 }
             }
 

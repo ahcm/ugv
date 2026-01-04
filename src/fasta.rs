@@ -147,30 +147,21 @@ impl Genome
 
     /// Load genome from a URL for WASM, checking for index files
     /// This function is async-compatible and returns a genome that can fetch ranges
+    /// For now, only supports uncompressed FASTA files with .fai index
     #[cfg(target_arch = "wasm32")]
     pub fn from_url_wasm(url: &str, fai_data: Vec<u8>, gzi_data: Option<Vec<u8>>) -> Result<Self>
     {
-        // Parse FAI index
-        let fai_entries = Self::parse_fai(&fai_data)?;
-
-        // Parse GZI index if provided
-        let gzi_entries = if let Some(gzi) = gzi_data
-        {
-            Some(Self::parse_gzi(&gzi)?)
-        }
-        else
-        {
-            None
-        };
-
-        // If we don't have GZI, we can't do efficient range fetching on gzipped files
-        // Fall back to full loading
-        if url.ends_with(".gz") && gzi_entries.is_none()
+        // For gzipped files, we'd need BGZF decompression which is complex in WASM
+        // Fall back to error so caller will use full loading instead
+        if url.ends_with(".gz")
         {
             return Err(anyhow::anyhow!(
-                "GZipped file requires .gzi index for efficient range fetching"
+                "Indexed loading for gzipped files not yet supported in WASM. Use full loading instead."
             ));
         }
+
+        // Parse FAI index
+        let fai_entries = Self::parse_fai(&fai_data)?;
 
         let chromosomes = fai_entries
             .iter()
@@ -188,7 +179,7 @@ impl Genome
         let wasm_indexed = WasmRemoteIndexed {
             data_url: url.to_string(),
             fai_entries,
-            gzi_entries: gzi_entries.unwrap_or_default(),
+            gzi_entries: Vec::new(),  // Not used for uncompressed files
         };
 
         Ok(Self {

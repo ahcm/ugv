@@ -172,7 +172,8 @@ async fn check_url_exists(url: &str) -> bool
 }
 
 /// Fetch both index files for a FASTA URL
-/// Returns (fai_data, gzi_data) or an error if either fails
+/// Returns (fai_data, gzi_data) - FAI is required, GZI is optional
+/// Succeeds if at least FAI can be fetched
 #[cfg(target_arch = "wasm32")]
 pub async fn fetch_index_files(fasta_url: &str) -> Result<(Vec<u8>, Option<Vec<u8>>)>
 {
@@ -188,7 +189,7 @@ pub async fn fetch_index_files(fasta_url: &str) -> Result<(Vec<u8>, Option<Vec<u
         match load_file_async(&gzi_url).await
         {
             Ok(data) => Some(data),
-            Err(_) => None,
+            Err(_) => None,  // GZI not available, but we can still work with just FAI for uncompressed
         }
     }
     else
