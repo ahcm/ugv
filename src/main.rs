@@ -702,13 +702,15 @@ impl GenomeViewer
                         self.status_message =
                             format!("Loaded {} chromosomes", genome.chromosomes.len());
 
-                        // Set to first chromosome
-                        if let Some(first_chr) = genome.chromosomes.keys().next()
-                        {
-                            self.selected_chromosome = Some(first_chr.clone());
-                            if let Some(chr) = genome.chromosomes.get(first_chr)
+                        // Set to first chromosome (only on initial load)
+                        if self.loading_chromosome.is_none() {
+                            if let Some(first_chr) = genome.chromosomes.keys().next()
                             {
-                                self.viewport = viewport::Viewport::new(0, chr.length);
+                                self.selected_chromosome = Some(first_chr.clone());
+                                if let Some(chr) = genome.chromosomes.get(first_chr)
+                                {
+                                    self.viewport = viewport::Viewport::new(0, chr.length);
+                                }
                             }
                         }
 
