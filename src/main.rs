@@ -1677,7 +1677,7 @@ impl eframe::App for GenomeViewer
 
                             #[cfg(not(target_arch = "wasm32"))]
                             {
-                                if ui.button("Open...").clicked()
+                                if ui.button("Local").clicked()
                                 {
                                     if let Some(path) = rfd::FileDialog::new()
                                         .add_filter("FASTA", &["fasta", "fa", "fna", "ffn", "faa", "frn"])
@@ -1696,6 +1696,13 @@ impl eframe::App for GenomeViewer
                                     }
                                 }
 
+                                ui.label("URL:");
+                                ui.add_sized([300.0, 20.0], egui::TextEdit::singleline(&mut self.fasta_path).hint_text("https://..."));
+                                if ui.button("Load URL").clicked()
+                                {
+                                    self.load_fasta();
+                                }
+
                                 if !self.fasta_path.is_empty()
                                 {
                                     ui.label(
@@ -1704,13 +1711,6 @@ impl eframe::App for GenomeViewer
                                             .and_then(|n| n.to_str())
                                             .unwrap_or(&self.fasta_path)
                                     );
-                                }
-
-                                ui.label("URL:");
-                                ui.add_sized([300.0, 20.0], egui::TextEdit::singleline(&mut self.fasta_path).hint_text("https://..."));
-                                if ui.button("Load URL").clicked()
-                                {
-                                    self.load_fasta();
                                 }
                             }
 
@@ -1741,7 +1741,7 @@ impl eframe::App for GenomeViewer
 
                             #[cfg(not(target_arch = "wasm32"))]
                             {
-                                if ui.button("Open...").clicked()
+                                if ui.button("Local").clicked()
                                 {
                                     if let Some(path) = rfd::FileDialog::new()
                                         .add_filter("GFF/GTF", &["gff", "gff3", "gtf"])
@@ -1754,6 +1754,13 @@ impl eframe::App for GenomeViewer
                                     }
                                 }
 
+                                ui.label("URL:");
+                                ui.add_sized([300.0, 20.0], egui::TextEdit::singleline(&mut self.gff_path).hint_text("https://..."));
+                                if ui.button("Load URL").clicked()
+                                {
+                                    self.load_gff();
+                                }
+
                                 if !self.gff_path.is_empty()
                                 {
                                     ui.label(
@@ -1762,13 +1769,6 @@ impl eframe::App for GenomeViewer
                                             .and_then(|n| n.to_str())
                                             .unwrap_or(&self.gff_path)
                                     );
-                                }
-
-                                ui.label("URL:");
-                                ui.add_sized([300.0, 20.0], egui::TextEdit::singleline(&mut self.gff_path).hint_text("https://..."));
-                                if ui.button("Load URL").clicked()
-                                {
-                                    self.load_gff();
                                 }
                             }
 
@@ -1799,7 +1799,7 @@ impl eframe::App for GenomeViewer
 
                             #[cfg(not(target_arch = "wasm32"))]
                             {
-                                if ui.button("Open...").clicked()
+                                if ui.button("Local").clicked()
                                 {
                                     if let Some(path) = rfd::FileDialog::new()
                                         .add_filter("BAM", &["bam"])
@@ -1811,6 +1811,13 @@ impl eframe::App for GenomeViewer
                                     }
                                 }
 
+                                ui.label("URL:");
+                                ui.add_sized([300.0, 20.0], egui::TextEdit::singleline(&mut self.bam_path).hint_text("https://..."));
+                                if ui.button("Load URL").clicked()
+                                {
+                                    self.load_bam();
+                                }
+
                                 if !self.bam_path.is_empty()
                                 {
                                     ui.label(
@@ -1819,13 +1826,6 @@ impl eframe::App for GenomeViewer
                                             .and_then(|n| n.to_str())
                                             .unwrap_or(&self.bam_path)
                                     );
-                                }
-
-                                ui.label("URL:");
-                                ui.add_sized([300.0, 20.0], egui::TextEdit::singleline(&mut self.bam_path).hint_text("https://..."));
-                                if ui.button("Load URL").clicked()
-                                {
-                                    self.load_bam();
                                 }
                             }
 
@@ -1856,7 +1856,7 @@ impl eframe::App for GenomeViewer
 
                             #[cfg(not(target_arch = "wasm32"))]
                             {
-                                if ui.button("Open...").clicked()
+                                if ui.button("Local").clicked()
                                 {
                                     if let Some(path) = rfd::FileDialog::new()
                                         .add_filter("TSV", &["tsv", "txt"])
