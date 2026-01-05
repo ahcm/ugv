@@ -717,7 +717,15 @@ impl GenomeViewer
                         // If we're restoring from a session, override with saved viewport
                         if let Some((saved_chr, saved_start, saved_end)) = self.session_viewport.take()
                         {
-                            self.selected_chromosome = saved_chr;
+                            self.selected_chromosome = saved_chr.clone();
+                            
+                            // Update viewport with correct max_length for the selected chromosome
+                            if let Some(chr_name) = &saved_chr {
+                                if let Some(chr_info) = genome.get_chromosome_info(chr_name) {
+                                    self.viewport = viewport::Viewport::new(0, chr_info.length);
+                                }
+                            }
+
                             self.viewport.start = saved_start;
                             self.viewport.end = saved_end;
                         }
