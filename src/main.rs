@@ -2294,7 +2294,43 @@ impl eframe::App for GenomeViewer
                 // Ensure chromosome is loaded (for indexed genomes)
                 if let Err(e) = genome.ensure_chromosome_loaded(chr_name)
                 {
-                    self.status_message = format!("Error loading chromosome: {}", e);
+                    #[cfg(target_arch = "wasm32")]
+                    if e.to_string().contains("WASM indexed genome requires async loading")
+                    {
+                        // Check if we are already loading this chromosome
+                        let is_loading = if let Some(ref progress) = self.loading_progress {
+                            progress.description.contains(chr_name)
+                        } else {
+                            false
+                        };
+
+                        if !is_loading {
+                            self.status_message = format!("Loading chromosome {}...", chr_name);
+                            self.loading_progress = Some(LoadingProgress {
+                                description: format!("Loading {}...", chr_name),
+                                bytes_loaded: 0,
+                                total_bytes: None,
+                            });
+
+                            let chr = chr_name.clone();
+                            // Clone genome to move into async block (it's cheap for indexed genomes)
+                            let mut genome_clone = genome.clone();
+                            let promise = poll_promise::Promise::spawn_local(async move {
+                                genome_clone.load_chromosome_async(&chr).await.map(|_| genome_clone)
+                            });
+                            
+                            *self.genome_promise.lock() = Some(promise);
+                        }
+                    }
+                    else
+                    {
+                        self.status_message = format!("Error loading chromosome: {}", e);
+                    }
+
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        self.status_message = format!("Error loading chromosome: {}", e);
+                    }
                 }
 
                 if let Some(chr) = genome.get_chromosome(chr_name)

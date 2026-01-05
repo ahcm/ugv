@@ -678,9 +678,16 @@ impl Genome
             #[cfg(target_arch = "wasm32")]
             GenomeData::WasmRemoteIndexed(_) =>
             {
-                Err(anyhow::anyhow!(
-                    "WASM indexed genome requires async loading. Use load_chromosome_async() instead."
-                ))
+                if self.chromosome_cache.contains_key(chr_name)
+                {
+                    Ok(())
+                }
+                else
+                {
+                    Err(anyhow::anyhow!(
+                        "WASM indexed genome requires async loading. Use load_chromosome_async() instead."
+                    ))
+                }
             }
         }
     }
