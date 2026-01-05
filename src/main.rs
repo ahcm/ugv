@@ -228,6 +228,10 @@ struct GenomeViewer
     #[cfg(target_arch = "wasm32")]
     file_picker_open: Option<FilePickerType>,
     loading_progress: Option<LoadingProgress>,
+    #[cfg(target_arch = "wasm32")]
+    failed_chromosomes: std::collections::HashSet<String>,
+    #[cfg(target_arch = "wasm32")]
+    loading_chromosome: Option<String>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -325,6 +329,10 @@ impl GenomeViewer
             #[cfg(target_arch = "wasm32")]
             file_picker_open: None,
             loading_progress: None,
+            #[cfg(target_arch = "wasm32")]
+            failed_chromosomes: std::collections::HashSet::new(),
+            #[cfg(target_arch = "wasm32")]
+            loading_chromosome: None,
         }
     }
 
@@ -712,10 +720,14 @@ impl GenomeViewer
                             self.viewport.end = saved_end;
                         }
                         self.genome = Some(genome.clone());
+                        self.loading_chromosome = None;
                     }
                     Err(e) =>
                     {
                         self.status_message = format!("Error loading FASTA: {}", e);
+                        if let Some(chr) = self.loading_chromosome.take() {
+                            self.failed_chromosomes.insert(chr);
+                        }
                     }
                 }
                 *promise_lock = None;
@@ -2298,19 +2310,17 @@ impl eframe::App for GenomeViewer
                     if e.to_string().contains("WASM indexed genome requires async loading")
                     {
                         // Check if we are already loading this chromosome
-                        let is_loading = if let Some(ref progress) = self.loading_progress {
-                            progress.description.contains(chr_name)
-                        } else {
-                            false
-                        };
+                        let is_loading = self.loading_chromosome.as_deref() == Some(chr_name);
+                        let has_failed = self.failed_chromosomes.contains(chr_name);
 
-                        if !is_loading {
+                        if !is_loading && !has_failed {
                             self.status_message = format!("Loading chromosome {}...", chr_name);
                             self.loading_progress = Some(LoadingProgress {
                                 description: format!("Loading {}...", chr_name),
                                 bytes_loaded: 0,
                                 total_bytes: None,
                             });
+                            self.loading_chromosome = Some(chr_name.clone());
 
                             let chr = chr_name.clone();
                             // Clone genome to move into async block (it's cheap for indexed genomes)
@@ -2320,6 +2330,11 @@ impl eframe::App for GenomeViewer
                             });
                             
                             *self.genome_promise.lock() = Some(promise);
+                        }
+                        else if has_failed
+                        {
+                            // Keep the error message visible if it failed
+                            // self.status_message is already set by check_genome_promise
                         }
                     }
                     else

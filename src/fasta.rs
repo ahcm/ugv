@@ -295,9 +295,7 @@ impl Genome
         else
         {
             // For uncompressed files, fetch the range directly
-            let num_lines = (fai_entry.length + fai_entry.line_bases - 1) / fai_entry.line_bases;
-            let bytes_needed = fai_entry.length + num_lines;
-            let data_end = fai_entry.offset + bytes_needed;
+            let data_end = fai_entry.offset_for_position(fai_entry.length as u64) as u64;
             let raw_data = Self::fetch_url_range(&data_url, fai_entry.offset, data_end).await?;
             Self::process_raw_sequence(&raw_data)
         };
@@ -330,7 +328,7 @@ impl Genome
     {
         // Calculate the byte range we need in uncompressed space
         let start_uncompressed = fai_entry.offset;
-        let end_uncompressed = fai_entry.offset + fai_entry.length;
+        let end_uncompressed = fai_entry.offset_for_position(fai_entry.length as u64);
 
         // Find which GZI blocks overlap with our range
         let entries = gzi_index.entries();
