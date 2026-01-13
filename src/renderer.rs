@@ -136,7 +136,7 @@ pub fn draw_ruler(
         );
 
         // Label
-        let label = format_position(tick);
+        let label = format_position(tick, tick_interval);
         painter.text(
             Pos2::new(x, ruler_rect.top() + 15.0),
             egui::Align2::CENTER_TOP,
@@ -652,15 +652,48 @@ fn calculate_tick_interval(width: usize) -> usize
     10_000_000
 }
 
-fn format_position(pos: usize) -> String
+fn format_position(pos: usize, tick_interval: usize) -> String
 {
+    let format_with_unit = |value: f64, unit: &str, interval_value: f64| {
+        let decimals = if interval_value >= 1.0
+        {
+            0
+        }
+        else if interval_value >= 0.1
+        {
+            1
+        }
+        else if interval_value >= 0.01
+        {
+            2
+        }
+        else
+        {
+            3
+        };
+        if decimals == 0
+        {
+            format!("{:.0}{}", value, unit)
+        }
+        else
+        {
+            format!("{:.*}{}", decimals, value, unit)
+        }
+    };
+
     if pos >= 1_000_000
     {
-        format!("{:.1}M", pos as f32 / 1_000_000.0)
+        let scale = 1_000_000.0;
+        let value = pos as f64 / scale;
+        let interval_value = tick_interval as f64 / scale;
+        format_with_unit(value, "Mb", interval_value)
     }
     else if pos >= 1_000
     {
-        format!("{:.1}K", pos as f32 / 1_000.0)
+        let scale = 1_000.0;
+        let value = pos as f64 / scale;
+        let interval_value = tick_interval as f64 / scale;
+        format_with_unit(value, "kb", interval_value)
     }
     else
     {
