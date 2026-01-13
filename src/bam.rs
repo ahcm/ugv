@@ -9,9 +9,9 @@ use noodles::sam;
 use std::io::Cursor;
 
 // Memory management constants
-const MAX_LOADED_REGION_SIZE: usize = 10_000_000; // 10MB max region
-const MAX_LOADED_ALIGNMENTS: usize = 100_000; // Max 100k reads
-const VIEWPORT_BUFFER: usize = 2_000_000; // ±2Mb buffer around viewport
+const MAX_LOADED_REGION_SIZE: usize = 100_000_000; // 10MB max region
+const MAX_LOADED_ALIGNMENTS: usize = 500_000; // Max 100k reads
+const VIEWPORT_BUFFER: usize = 50_000_000; // ±2Mb buffer around viewport
 
 /// CIGAR operation types
 #[derive(Debug, Clone, Copy, PartialEq)]
