@@ -2216,6 +2216,7 @@ impl eframe::App for GenomeViewer
         // Search panel (below top panel)
         egui::TopBottomPanel::top("search_panel").show(ctx, |ui| {
             ui.horizontal(|ui| {
+                ui.checkbox(&mut self.show_chromosome_panel, "Show chromosome list");
                 ui.label("Go to:");
                 let go_to_response = ui.add(
                     egui::TextEdit::singleline(&mut self.position_search)
@@ -2254,7 +2255,6 @@ impl eframe::App for GenomeViewer
 
                 ui.separator();
 
-                ui.checkbox(&mut self.show_chromosome_panel, "Show chromosome list");
                 ui.checkbox(&mut self.show_track_panel, "Show track config");
             });
         });
