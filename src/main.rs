@@ -940,8 +940,36 @@ impl GenomeViewer
                                 }
                             }
 
-                            self.viewport.start = saved_start;
-                            self.viewport.end = saved_end;
+                            if let Some(chr_name) = &saved_chr
+                            {
+                                if let Some(chr_info) = genome.get_chromosome_info(chr_name)
+                                {
+                                    let max_length = chr_info.length;
+                                    let start = saved_start.min(max_length);
+                                    let end = saved_end.min(max_length);
+                                    let (mut start, mut end) = if end >= start {
+                                        (start, end)
+                                    } else {
+                                        (end, start)
+                                    };
+                                    if start == end && max_length > 0
+                                    {
+                                        end = (start + 1).min(max_length);
+                                    }
+                                    self.viewport.start = start;
+                                    self.viewport.end = end;
+                                }
+                                else
+                                {
+                                    self.viewport.start = saved_start;
+                                    self.viewport.end = saved_end;
+                                }
+                            }
+                            else
+                            {
+                                self.viewport.start = saved_start;
+                                self.viewport.end = saved_end;
+                            }
                         }
                         self.genome = Some(genome.clone());
                         self.loading_chromosome = None;
@@ -1579,9 +1607,40 @@ impl GenomeViewer
         // For native, this happens immediately. For WASM, it happens in check_genome_promise
         #[cfg(not(target_arch = "wasm32"))]
         {
-            self.selected_chromosome = session.selected_chromosome;
-            self.viewport.start = session.viewport_start;
-            self.viewport.end = session.viewport_end;
+            self.selected_chromosome = session.selected_chromosome.clone();
+
+            if let (Some(ref genome), Some(ref chr_name)) =
+                (&self.genome, &session.selected_chromosome)
+            {
+                if let Some(chr_info) = genome.get_chromosome_info(chr_name)
+                {
+                    self.viewport = viewport::Viewport::new(0, chr_info.length);
+                    let max_length = chr_info.length;
+                    let start = session.viewport_start.min(max_length);
+                    let end = session.viewport_end.min(max_length);
+                    let (mut start, mut end) = if end >= start {
+                        (start, end)
+                    } else {
+                        (end, start)
+                    };
+                    if start == end && max_length > 0
+                    {
+                        end = (start + 1).min(max_length);
+                    }
+                    self.viewport.start = start;
+                    self.viewport.end = end;
+                }
+                else
+                {
+                    self.viewport.start = session.viewport_start;
+                    self.viewport.end = session.viewport_end;
+                }
+            }
+            else
+            {
+                self.viewport.start = session.viewport_start;
+                self.viewport.end = session.viewport_end;
+            }
         }
     }
 
