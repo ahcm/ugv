@@ -681,23 +681,23 @@ fn format_position(pos: usize, tick_interval: usize) -> String
         }
     };
 
-    if pos >= 1_000_000
+    if tick_interval < 1_000
     {
-        let scale = 1_000_000.0;
-        let value = pos as f64 / scale;
-        let interval_value = tick_interval as f64 / scale;
-        format_with_unit(value, "Mb", interval_value)
+        format!("{} bp", pos)
     }
-    else if pos >= 1_000
+    else if tick_interval < 1_000_000
     {
         let scale = 1_000.0;
         let value = pos as f64 / scale;
         let interval_value = tick_interval as f64 / scale;
-        format_with_unit(value, "kb", interval_value)
+        format_with_unit(value, " kb", interval_value)
     }
     else
     {
-        pos.to_string()
+        let scale = 1_000_000.0;
+        let value = pos as f64 / scale;
+        let interval_value = tick_interval as f64 / scale;
+        format_with_unit(value, " Mb", interval_value)
     }
 }
 
