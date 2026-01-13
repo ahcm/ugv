@@ -1,5 +1,7 @@
 /target
 
+Cargo.lock
+
 # WebAssembly build artifacts
 ugv.js
 ugv_bg.wasm

@@ -947,9 +947,12 @@ impl GenomeViewer
                                     let max_length = chr_info.length;
                                     let start = saved_start.min(max_length);
                                     let end = saved_end.min(max_length);
-                                    let (mut start, mut end) = if end >= start {
+                                    let (mut start, mut end) = if end >= start
+                                    {
                                         (start, end)
-                                    } else {
+                                    }
+                                    else
+                                    {
                                         (end, start)
                                     };
                                     if start == end && max_length > 0
@@ -1618,9 +1621,12 @@ impl GenomeViewer
                     let max_length = chr_info.length;
                     let start = session.viewport_start.min(max_length);
                     let end = session.viewport_end.min(max_length);
-                    let (mut start, mut end) = if end >= start {
+                    let (mut start, mut end) = if end >= start
+                    {
                         (start, end)
-                    } else {
+                    }
+                    else
+                    {
                         (end, start)
                     };
                     if start == end && max_length > 0
