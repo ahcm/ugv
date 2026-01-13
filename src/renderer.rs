@@ -32,10 +32,8 @@ pub fn draw_empty_track(
     label: &str,
 ) -> f32
 {
-    let track_rect = Rect::from_min_size(
-        Pos2::new(rect.left(), y_offset),
-        Vec2::new(rect.width(), height),
-    );
+    let track_rect =
+        Rect::from_min_size(Pos2::new(rect.left(), y_offset), Vec2::new(rect.width(), height));
 
     // Background
     painter.rect_filled(track_rect, 0.0, Color32::from_gray(250));
@@ -65,15 +63,49 @@ pub fn draw_empty_track(
 }
 
 // Make these functions public so they can be called from main.rs
-pub fn draw_ruler(painter: &Painter, rect: Rect, viewport: &Viewport, y_offset: f32, height: f32, chromosome_name: &str) -> f32
+pub fn draw_ruler(
+    painter: &Painter,
+    rect: Rect,
+    viewport: &Viewport,
+    y_offset: f32,
+    height: f32,
+    chromosome_name: &str,
+    selection: Option<(usize, usize)>,
+) -> f32
 {
-    let ruler_rect = Rect::from_min_size(
-        Pos2::new(rect.left(), y_offset),
-        Vec2::new(rect.width(), height),
-    );
+    let ruler_rect =
+        Rect::from_min_size(Pos2::new(rect.left(), y_offset), Vec2::new(rect.width(), height));
 
     // Background
     painter.rect_filled(ruler_rect, 0.0, Color32::from_gray(240));
+
+    if let Some((selection_start, selection_end)) = selection
+    {
+        let start = selection_start.min(selection_end);
+        let end = selection_start.max(selection_end).saturating_add(1);
+        let clipped_start = start.max(viewport.start).min(viewport.end);
+        let clipped_end = end.max(viewport.start).min(viewport.end);
+
+        if clipped_end > clipped_start
+        {
+            let x_start = viewport.position_to_screen(clipped_start, rect.width()) + rect.left();
+            let x_end = viewport.position_to_screen(clipped_end, rect.width()) + rect.left();
+            let selection_rect = Rect::from_min_max(
+                Pos2::new(x_start, ruler_rect.top()),
+                Pos2::new(x_end, ruler_rect.bottom()),
+            );
+            painter.rect_filled(
+                selection_rect,
+                0.0,
+                Color32::from_rgba_unmultiplied(120, 170, 220, 120),
+            );
+            painter.rect_stroke(
+                selection_rect,
+                0.0,
+                Stroke::new(1.0, Color32::from_rgb(80, 120, 170)),
+            );
+        }
+    }
 
     // Draw chromosome name on the left
     painter.text(
@@ -126,10 +158,8 @@ pub fn draw_gc_content(
     height: f32,
 ) -> f32
 {
-    let gc_rect = Rect::from_min_size(
-        Pos2::new(rect.left(), y_offset),
-        Vec2::new(rect.width(), height),
-    );
+    let gc_rect =
+        Rect::from_min_size(Pos2::new(rect.left(), y_offset), Vec2::new(rect.width(), height));
 
     // Background
     painter.rect_filled(gc_rect, 0.0, Color32::from_gray(250));
@@ -189,10 +219,8 @@ pub fn draw_sequence(
     height: f32,
 ) -> f32
 {
-    let seq_rect = Rect::from_min_size(
-        Pos2::new(rect.left(), y_offset),
-        Vec2::new(rect.width(), height),
-    );
+    let seq_rect =
+        Rect::from_min_size(Pos2::new(rect.left(), y_offset), Vec2::new(rect.width(), height));
 
     painter.rect_filled(seq_rect, 0.0, Color32::from_gray(245));
 
@@ -286,10 +314,8 @@ pub fn draw_amino_acid_frames(
     // Divide height equally among 6 frames
     let frame_height = height / 6.0;
 
-    let frame_rect = Rect::from_min_size(
-        Pos2::new(rect.left(), y_offset),
-        Vec2::new(rect.width(), height),
-    );
+    let frame_rect =
+        Rect::from_min_size(Pos2::new(rect.left(), y_offset), Vec2::new(rect.width(), height));
 
     // Background
     painter.rect_filled(frame_rect, 0.0, Color32::from_gray(250));
@@ -348,10 +374,8 @@ fn draw_single_frame(
     is_forward: bool,
 )
 {
-    let track_rect = Rect::from_min_size(
-        Pos2::new(rect.left(), y_offset),
-        Vec2::new(rect.width(), height),
-    );
+    let track_rect =
+        Rect::from_min_size(Pos2::new(rect.left(), y_offset), Vec2::new(rect.width(), height));
 
     // Draw background
     let bg_color = if is_forward
@@ -509,9 +533,12 @@ pub fn draw_features(
 
     // Calculate row height based on total height and number of rows
     let num_rows = tracks.len().max(1);
-    let row_height = if num_rows > 1 {
+    let row_height = if num_rows > 1
+    {
         (height - (TRACK_SPACING * (num_rows - 1) as f32)) / num_rows as f32
-    } else {
+    }
+    else
+    {
         height
     };
 
@@ -655,10 +682,8 @@ pub fn draw_coverage_track(
     height: f32,
 ) -> f32
 {
-    let track_rect = Rect::from_min_size(
-        Pos2::new(rect.left(), y_offset),
-        Vec2::new(rect.width(), height),
-    );
+    let track_rect =
+        Rect::from_min_size(Pos2::new(rect.left(), y_offset), Vec2::new(rect.width(), height));
 
     // Background
     painter.rect_filled(track_rect, 0.0, Color32::from_gray(250));
@@ -828,17 +853,18 @@ pub fn draw_alignments(
     let available_height = height - label_height;
     let num_rows = rows.len().min(MAX_ALIGNMENT_ROWS);
     let row_spacing = 2.0;
-    let row_height = if num_rows > 0 {
+    let row_height = if num_rows > 0
+    {
         ((available_height - (num_rows as f32 - 1.0) * row_spacing) / num_rows as f32).max(1.0)
-    } else {
+    }
+    else
+    {
         12.0
     };
 
     // Background
-    let track_rect = Rect::from_min_size(
-        Pos2::new(rect.left(), y_offset),
-        Vec2::new(rect.width(), height),
-    );
+    let track_rect =
+        Rect::from_min_size(Pos2::new(rect.left(), y_offset), Vec2::new(rect.width(), height));
     painter.rect_filled(track_rect, 0.0, Color32::from_gray(245));
 
     // Draw label
@@ -895,8 +921,7 @@ fn draw_single_read(
     let color =
         Color32::from_rgba_premultiplied(base_color.r(), base_color.g(), base_color.b(), alpha);
 
-    let read_rect =
-        Rect::from_min_size(Pos2::new(start_x, y), Vec2::new(width, height));
+    let read_rect = Rect::from_min_size(Pos2::new(start_x, y), Vec2::new(width, height));
 
     painter.rect_filled(read_rect, 1.0, color);
     painter.rect_stroke(read_rect, 1.0, Stroke::new(0.5, Color32::from_gray(100)));
@@ -912,10 +937,8 @@ pub fn draw_variant_summary(
     height: f32,
 ) -> f32
 {
-    let track_rect = Rect::from_min_size(
-        Pos2::new(rect.left(), y_offset),
-        Vec2::new(rect.width(), height),
-    );
+    let track_rect =
+        Rect::from_min_size(Pos2::new(rect.left(), y_offset), Vec2::new(rect.width(), height));
 
     // Background
     painter.rect_filled(track_rect, 0.0, Color32::from_gray(250));
@@ -1021,10 +1044,8 @@ pub fn draw_methylation_track(
     height: f32,
 ) -> f32
 {
-    let track_rect = Rect::from_min_size(
-        Pos2::new(rect.left(), y_offset),
-        Vec2::new(rect.width(), height),
-    );
+    let track_rect =
+        Rect::from_min_size(Pos2::new(rect.left(), y_offset), Vec2::new(rect.width(), height));
 
     // Background
     painter.rect_filled(track_rect, 0.0, Color32::from_gray(250));
@@ -1118,7 +1139,9 @@ pub fn draw_methylation_track(
 
     for point in methylation_slice
     {
-        if point.position < viewport.start || point.position >= viewport.end || point.total_calls == 0
+        if point.position < viewport.start
+            || point.position >= viewport.end
+            || point.total_calls == 0
         {
             continue;
         }
@@ -1197,20 +1220,14 @@ pub fn draw_tsv_track(
     height: f32,
 ) -> f32
 {
-    let track_rect = Rect::from_min_size(
-        Pos2::new(rect.left(), y_offset),
-        Vec2::new(rect.width(), height),
-    );
+    let track_rect =
+        Rect::from_min_size(Pos2::new(rect.left(), y_offset), Vec2::new(rect.width(), height));
 
     // Draw track background
     painter.rect_filled(track_rect, 0.0, Color32::from_gray(245));
 
     // Draw track border
-    painter.rect_stroke(
-        track_rect,
-        0.0,
-        Stroke::new(1.0, Color32::from_gray(200)),
-    );
+    painter.rect_stroke(track_rect, 0.0, Stroke::new(1.0, Color32::from_gray(200)));
 
     // Draw track label
     painter.text(
@@ -1237,8 +1254,14 @@ pub fn draw_tsv_track(
     }
 
     // Calculate value range for this view
-    let min_signal = points.iter().map(|p| p.signal).fold(f64::INFINITY, f64::min);
-    let max_signal = points.iter().map(|p| p.signal).fold(f64::NEG_INFINITY, f64::max);
+    let min_signal = points
+        .iter()
+        .map(|p| p.signal)
+        .fold(f64::INFINITY, f64::min);
+    let max_signal = points
+        .iter()
+        .map(|p| p.signal)
+        .fold(f64::NEG_INFINITY, f64::max);
     let signal_range = max_signal - min_signal;
 
     // Draw scale labels
@@ -1264,8 +1287,8 @@ pub fn draw_tsv_track(
     // Draw zero line if range includes zero
     if min_signal <= 0.0 && max_signal >= 0.0 && signal_range > 0.0
     {
-        let zero_y = y_offset + 25.0
-            + (height - 30.0) * (1.0 - ((0.0 - min_signal) / signal_range) as f32);
+        let zero_y =
+            y_offset + 25.0 + (height - 30.0) * (1.0 - ((0.0 - min_signal) / signal_range) as f32);
         painter.line_segment(
             [
                 Pos2::new(rect.left() + 50.0, zero_y),
@@ -1305,10 +1328,7 @@ pub fn draw_tsv_track(
         // Draw line to previous point
         if let Some(prev) = prev_pos
         {
-            painter.line_segment(
-                [prev, pos],
-                Stroke::new(1.5, Color32::from_rgb(50, 100, 200)),
-            );
+            painter.line_segment([prev, pos], Stroke::new(1.5, Color32::from_rgb(50, 100, 200)));
         }
 
         prev_pos = Some(pos);

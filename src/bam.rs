@@ -62,10 +62,10 @@ pub enum ModificationType
 #[derive(Debug, Clone)]
 pub struct MethylationCall
 {
-    pub position: usize,          // Genomic position (0-based)
-    pub read_position: usize,     // Position in read sequence
+    pub position: usize,      // Genomic position (0-based)
+    pub read_position: usize, // Position in read sequence
     pub modification: ModificationType,
-    pub probability: u8,          // 0-255 (ML tag value)
+    pub probability: u8, // 0-255 (ML tag value)
     pub strand: Strand,
 }
 
@@ -74,9 +74,9 @@ pub struct MethylationCall
 pub struct MethylationPoint
 {
     pub position: usize,
-    pub total_calls: u32,         // Number of reads covering this position
-    pub methylated_calls: u32,    // Reads with methylation probability > 128
-    pub probability_sum: u64,     // Sum of probabilities for averaging
+    pub total_calls: u32,      // Number of reads covering this position
+    pub methylated_calls: u32, // Reads with methylation probability > 128
+    pub probability_sum: u64,  // Sum of probabilities for averaging
 }
 
 /// Single alignment record with pre-computed fields
@@ -84,15 +84,15 @@ pub struct MethylationPoint
 pub struct AlignmentRecord
 {
     pub name: String,
-    pub reference_start: usize,       // 0-based position
-    pub reference_end: usize,         // Computed from alignment length
-    pub sequence: Vec<u8>,            // Read sequence
-    pub quality_scores: Vec<u8>,      // Phred quality scores
-    pub mapping_quality: u8,          // MAPQ
-    pub flags: u16,                   // SAM flags
-    pub strand: Strand,               // Forward or Reverse
-    pub cigar: Vec<CigarOp>,          // Parsed CIGAR operations
-    pub variants: Vec<Variant>,       // Pre-computed from CIGAR + MD tag
+    pub reference_start: usize,            // 0-based position
+    pub reference_end: usize,              // Computed from alignment length
+    pub sequence: Vec<u8>,                 // Read sequence
+    pub quality_scores: Vec<u8>,           // Phred quality scores
+    pub mapping_quality: u8,               // MAPQ
+    pub flags: u16,                        // SAM flags
+    pub strand: Strand,                    // Forward or Reverse
+    pub cigar: Vec<CigarOp>,               // Parsed CIGAR operations
+    pub variants: Vec<Variant>,            // Pre-computed from CIGAR + MD tag
     pub methylation: Vec<MethylationCall>, // Methylation calls from MM/ML tags
 }
 
@@ -425,7 +425,10 @@ impl AlignmentData
         // Calculate region with buffer
         let buffer_start = viewport_start.saturating_sub(VIEWPORT_BUFFER);
         let buffer_end = (viewport_end + VIEWPORT_BUFFER).min(
-            *self.reference_lengths.get(chromosome).unwrap_or(&usize::MAX)
+            *self
+                .reference_lengths
+                .get(chromosome)
+                .unwrap_or(&usize::MAX),
         );
 
         // Limit region size
@@ -479,12 +482,7 @@ impl AlignmentData
 
     /// Load a specific region from BAM file using indexed reader
     #[cfg(not(target_arch = "wasm32"))]
-    fn load_region(
-        &mut self,
-        chromosome: &str,
-        start: usize,
-        end: usize,
-    ) -> Result<()>
+    fn load_region(&mut self, chromosome: &str, start: usize, end: usize) -> Result<()>
     {
         use noodles::core::Region;
 
@@ -493,8 +491,8 @@ impl AlignmentData
         track.loaded_region = Some((start, end));
 
         // Try to use indexed reader
-        let indexed_result = bam::io::indexed_reader::Builder::default()
-            .build_from_path(&self.bam_path);
+        let indexed_result =
+            bam::io::indexed_reader::Builder::default().build_from_path(&self.bam_path);
 
         if let Ok(mut reader) = indexed_result
         {
@@ -510,7 +508,10 @@ impl AlignmentData
                 {
                     if count >= MAX_LOADED_ALIGNMENTS
                     {
-                        eprintln!("Warning: Hit alignment limit of {} for region", MAX_LOADED_ALIGNMENTS);
+                        eprintln!(
+                            "Warning: Hit alignment limit of {} for region",
+                            MAX_LOADED_ALIGNMENTS
+                        );
                         break;
                     }
 
@@ -526,7 +527,10 @@ impl AlignmentData
         else
         {
             // Fallback: no index available, scan entire file (slow)
-            eprintln!("Warning: BAM index not found for {}, scanning entire file (slow)", self.bam_path);
+            eprintln!(
+                "Warning: BAM index not found for {}, scanning entire file (slow)",
+                self.bam_path
+            );
 
             use std::fs::File;
             let mut reader = bam::io::Reader::new(File::open(&self.bam_path)?);
@@ -624,7 +628,10 @@ impl AlignmentData
         {
             if count >= MAX_LOADED_ALIGNMENTS
             {
-                eprintln!("Warning: Hit alignment limit of {} for chromosome", MAX_LOADED_ALIGNMENTS);
+                eprintln!(
+                    "Warning: Hit alignment limit of {} for chromosome",
+                    MAX_LOADED_ALIGNMENTS
+                );
                 break;
             }
 
@@ -793,9 +800,9 @@ impl AlignmentData
 
         let mod_type = match (base, mod_char)
         {
-            (b'C', 'm') => ModificationType::FiveMC,   // 5mC
-            (b'C', 'h') => ModificationType::FiveHMC,  // 5hmC
-            (b'A', 'a') => ModificationType::SixMA,    // 6mA
+            (b'C', 'm') => ModificationType::FiveMC,  // 5mC
+            (b'C', 'h') => ModificationType::FiveHMC, // 5hmC
+            (b'A', 'a') => ModificationType::SixMA,   // 6mA
             _ => ModificationType::Other,
         };
 
@@ -841,9 +848,7 @@ impl AlignmentData
         {
             match op
             {
-                CigarOp::Match(len)
-                | CigarOp::SeqMatch(len)
-                | CigarOp::SeqMismatch(len) =>
+                CigarOp::Match(len) | CigarOp::SeqMatch(len) | CigarOp::SeqMismatch(len) =>
                 {
                     if read_offset + len > read_pos
                     {
@@ -876,10 +881,7 @@ impl AlignmentData
     }
 
     /// Parse a single BAM record into AlignmentRecord
-    fn parse_record(
-        record: &bam::Record,
-        header: &sam::Header,
-    ) -> Result<Option<AlignmentRecord>>
+    fn parse_record(record: &bam::Record, header: &sam::Header) -> Result<Option<AlignmentRecord>>
     {
         // Skip unmapped reads
         let flags = record.flags();
@@ -956,13 +958,8 @@ impl AlignmentData
         };
 
         // Parse methylation from MM/ML tags
-        let methylation = Self::parse_methylation_tags(
-            record,
-            reference_start,
-            &cigar_ops,
-            &sequence,
-            strand,
-        );
+        let methylation =
+            Self::parse_methylation_tags(record, reference_start, &cigar_ops, &sequence, strand);
 
         let mut alignment = AlignmentRecord {
             name,

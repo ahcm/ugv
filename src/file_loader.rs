@@ -40,7 +40,8 @@ fn load_file_native(path: &str) -> Result<Vec<u8>>
             ));
         }
 
-        let bytes = response.bytes()
+        let bytes = response
+            .bytes()
             .with_context(|| format!("Failed to read response body from: {}", path))?;
 
         return Ok(bytes.to_vec());
@@ -204,7 +205,7 @@ pub async fn fetch_index_files(fasta_url: &str) -> Result<(Vec<u8>, Option<Vec<u
         match load_file_async(&gzi_url).await
         {
             Ok(data) => Some(data),
-            Err(_) => None,  // GZI not available, but we can still work with just FAI for uncompressed
+            Err(_) => None, // GZI not available, but we can still work with just FAI for uncompressed
         }
     }
     else

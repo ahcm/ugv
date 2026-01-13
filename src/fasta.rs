@@ -1,11 +1,11 @@
 use anyhow::{Context, Result};
-use fastx::indexed::IndexedFastXReader;
-use fastx::FastX::{fasta_iter, reader_from_path, FastXRead};
+use fastx::FastX::{FastXRead, fasta_iter, reader_from_path};
 use fastx::fai::FaiEntry;
 #[cfg(target_arch = "wasm32")]
 use fastx::fai::FaiIndex;
 #[cfg(target_arch = "wasm32")]
 use fastx::gzi::GziIndex;
+use fastx::indexed::IndexedFastXReader;
 
 use flate2::read::MultiGzDecoder;
 use std::collections::HashMap;
@@ -100,14 +100,11 @@ impl Clone for Genome
                 }
             }
             #[cfg(target_arch = "wasm32")]
-            GenomeData::WasmRemoteIndexed(wasm_indexed) =>
-            {
-                Self {
-                    chromosomes: self.chromosomes.clone(),
-                    data: GenomeData::WasmRemoteIndexed(wasm_indexed.clone()),
-                    chromosome_cache: self.chromosome_cache.clone(),
-                }
-            }
+            GenomeData::WasmRemoteIndexed(wasm_indexed) => Self {
+                chromosomes: self.chromosomes.clone(),
+                data: GenomeData::WasmRemoteIndexed(wasm_indexed.clone()),
+                chromosome_cache: self.chromosome_cache.clone(),
+            },
             _ =>
             {
                 // For indexed modes, we can't clone the reader
@@ -150,8 +147,10 @@ impl Genome
         {
             if url.ends_with(".gz")
             {
-                Some(GziIndex::from_bytes(&gzi)
-                    .map_err(|e| anyhow::anyhow!("Failed to parse GZI: {}", e))?)
+                Some(
+                    GziIndex::from_bytes(&gzi)
+                        .map_err(|e| anyhow::anyhow!("Failed to parse GZI: {}", e))?,
+                )
             }
             else
             {
@@ -231,9 +230,7 @@ impl Genome
         let status = response.status();
         if status != 200 && status != 206
         {
-            return Err(anyhow::anyhow!(
-                "HTTP error {}: {}", status, response.status_text()
-            ));
+            return Err(anyhow::anyhow!("HTTP error {}: {}", status, response.status_text()));
         }
 
         let array_buffer_promise = response
@@ -262,7 +259,8 @@ impl Genome
 
         let (data_url, fai_index, gzi_index, is_gzipped) = match &self.data
         {
-            GenomeData::WasmRemoteIndexed(wasm_indexed) => {
+            GenomeData::WasmRemoteIndexed(wasm_indexed) =>
+            {
                 let is_gzipped = wasm_indexed.data_url.ends_with(".gz");
                 (
                     wasm_indexed.data_url.clone(),
@@ -289,7 +287,8 @@ impl Genome
         let sequence = if is_gzipped
         {
             // For BGZF-compressed files, use the GZI index to fetch and decompress blocks
-            let gzi = gzi_index.ok_or_else(|| anyhow::anyhow!("Missing GZI index for compressed file"))?;
+            let gzi = gzi_index
+                .ok_or_else(|| anyhow::anyhow!("Missing GZI index for compressed file"))?;
             Self::fetch_bgzf_sequence(&data_url, fai_entry, &gzi, length).await?
         }
         else
@@ -304,7 +303,9 @@ impl Genome
         {
             return Err(anyhow::anyhow!(
                 "Sequence length mismatch for '{}': expected {}, got {}",
-                chr_name, length, sequence.len()
+                chr_name,
+                length,
+                sequence.len()
             ));
         }
 
@@ -332,7 +333,7 @@ impl Genome
 
         // Find which GZI blocks overlap with our range
         let entries = gzi_index.entries();
-        
+
         let start_block_idx = entries
             .partition_point(|&(_, unc)| unc < start_uncompressed)
             .saturating_sub(1);
@@ -561,7 +562,11 @@ impl Genome
             let record = result.with_context(|| "Failed to parse FASTA record")?;
 
             let name = record.id().to_string();
-            let sequence: Vec<u8> = record.seq().iter().map(|&b| b.to_ascii_uppercase()).collect();
+            let sequence: Vec<u8> = record
+                .seq()
+                .iter()
+                .map(|&b| b.to_ascii_uppercase())
+                .collect();
             let length = sequence.len();
 
             let chr = Chromosome {
@@ -613,7 +618,7 @@ impl Genome
         match &self.data
         {
             GenomeData::Full(chromosomes) => chromosomes.get(chr_name),
-            _ => self.chromosome_cache.get(chr_name)
+            _ => self.chromosome_cache.get(chr_name),
         }
     }
 
@@ -635,8 +640,11 @@ impl Genome
                     let record = reader
                         .fetch(chr_name)
                         .with_context(|| format!("Failed to fetch chromosome '{}'", chr_name))?;
-                    let sequence: Vec<u8> =
-                        record.seq().iter().map(|&b| b.to_ascii_uppercase()).collect();
+                    let sequence: Vec<u8> = record
+                        .seq()
+                        .iter()
+                        .map(|&b| b.to_ascii_uppercase())
+                        .collect();
 
                     let chr = Chromosome {
                         name: chr_name.to_string(),
@@ -661,8 +669,11 @@ impl Genome
                     let record = reader
                         .fetch(chr_name)
                         .with_context(|| format!("Failed to fetch chromosome '{}'", chr_name))?;
-                    let sequence: Vec<u8> =
-                        record.seq().iter().map(|&b| b.to_ascii_uppercase()).collect();
+                    let sequence: Vec<u8> = record
+                        .seq()
+                        .iter()
+                        .map(|&b| b.to_ascii_uppercase())
+                        .collect();
 
                     let chr = Chromosome {
                         name: chr_name.to_string(),
@@ -690,18 +701,15 @@ impl Genome
         }
     }
 
-    pub fn get_full_sequence(&mut self, chr_name: &str) -> Result<&[u8]> 
+    pub fn get_full_sequence(&mut self, chr_name: &str) -> Result<&[u8]>
     {
         self.ensure_chromosome_loaded(chr_name)?;
         match &self.data
         {
-            GenomeData::Full(chromosomes) =>
-            {
-                chromosomes
-                    .get(chr_name)
-                    .map(|c| c.sequence.as_slice())
-                    .ok_or_else(|| anyhow::anyhow!("Chromosome '{}' not found", chr_name))
-            }
+            GenomeData::Full(chromosomes) => chromosomes
+                .get(chr_name)
+                .map(|c| c.sequence.as_slice())
+                .ok_or_else(|| anyhow::anyhow!("Chromosome '{}' not found", chr_name)),
             _ => self
                 .chromosome_cache
                 .get(chr_name)
@@ -783,16 +791,17 @@ impl Genome
         self.chromosome_cache.clear();
     }
 
-    pub fn get_sequence(&self, chr: &str, start: usize, end: usize) -> Option<&[u8]> 
+    pub fn get_sequence(&self, chr: &str, start: usize, end: usize) -> Option<&[u8]>
     {
         match &self.data
         {
             GenomeData::Full(chromosomes) => chromosomes
                 .get(chr)
                 .and_then(|c| c.sequence.get(start..end)),
-            _ => self.chromosome_cache
-                    .get(chr)
-                    .and_then(|c| c.sequence.get(start..end))
+            _ => self
+                .chromosome_cache
+                .get(chr)
+                .and_then(|c| c.sequence.get(start..end)),
         }
     }
 
@@ -836,10 +845,7 @@ impl Chromosome
     }
 }
 
-fn region_length(start: usize, end: usize) -> usize {
-    if end > start {
-        end - start
-    } else {
-        0
-    }
+fn region_length(start: usize, end: usize) -> usize
+{
+    if end > start { end - start } else { 0 }
 }

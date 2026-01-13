@@ -43,15 +43,7 @@ pub fn create_app_icon() -> egui::IconData
         // Draw connectors at crossover points (every ~20 pixels)
         if y % 10 == 0 && y > 0 && y < size - 1
         {
-            draw_line(
-                &mut rgba,
-                size,
-                x1 as i32,
-                y as i32,
-                x2 as i32,
-                y as i32,
-                &connector_color,
-            );
+            draw_line(&mut rgba, size, x1 as i32, y as i32, x2 as i32, y as i32, &connector_color);
         }
     }
 
@@ -83,15 +75,7 @@ fn draw_circle(rgba: &mut [u8], size: usize, cx: i32, cy: i32, radius: i32, colo
     }
 }
 
-fn draw_line(
-    rgba: &mut [u8],
-    size: usize,
-    x0: i32,
-    y0: i32,
-    x1: i32,
-    y1: i32,
-    color: &[u8; 4],
-)
+fn draw_line(rgba: &mut [u8], size: usize, x0: i32, y0: i32, x1: i32, y1: i32, color: &[u8; 4])
 {
     let dx = (x1 - x0).abs();
     let dy = (y1 - y0).abs();

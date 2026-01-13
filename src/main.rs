@@ -13,6 +13,8 @@ mod viewport;
 use anyhow::Result;
 use eframe::egui;
 
+const TRACK_SPACING: f32 = 10.0;
+
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> Result<()>
 {
@@ -210,6 +212,9 @@ struct GenomeViewer
     track_order: Vec<TrackType>,
     show_track_panel: bool,
     show_file_panel: bool,
+    ruler_selection: Option<(usize, usize)>,
+    ruler_selection_drag: Option<usize>,
+    ruler_selection_chr: Option<String>,
     // Session restoration (WASM only - for async file loading)
     #[cfg(target_arch = "wasm32")]
     session_viewport: Option<(Option<String>, usize, usize)>, // (chromosome, start, end)
@@ -277,6 +282,30 @@ fn format_bytes(bytes: usize) -> String
     }
 }
 
+fn format_fasta(header: &str, sequence: &[u8]) -> String
+{
+    use std::fmt::Write;
+
+    let mut fasta = String::new();
+    let _ = writeln!(fasta, "{}", header);
+    for chunk in sequence.chunks(60)
+    {
+        if let Ok(text) = std::str::from_utf8(chunk)
+        {
+            fasta.push_str(text);
+        }
+        else
+        {
+            for &base in chunk
+            {
+                fasta.push(base as char);
+            }
+        }
+        fasta.push('\n');
+    }
+    fasta
+}
+
 impl GenomeViewer
 {
     fn new() -> Self
@@ -311,6 +340,9 @@ impl GenomeViewer
             track_order: Self::default_track_order(),
             show_track_panel: false,
             show_file_panel: true,
+            ruler_selection: None,
+            ruler_selection_drag: None,
+            ruler_selection_chr: None,
             // Session restoration (WASM only)
             #[cfg(target_arch = "wasm32")]
             session_viewport: None,
@@ -371,6 +403,182 @@ impl GenomeViewer
             TrackType::Methylation,
             TrackType::CustomTsv,
         ]
+    }
+
+    fn clear_ruler_selection(&mut self)
+    {
+        self.ruler_selection = None;
+        self.ruler_selection_drag = None;
+        self.ruler_selection_chr = None;
+    }
+
+    fn active_selection(&self) -> Option<(String, usize, usize)>
+    {
+        let (start, end) = self.ruler_selection?;
+        let chr = self.selected_chromosome.as_ref()?;
+        let selection_chr = self.ruler_selection_chr.as_ref()?;
+        if chr != selection_chr
+        {
+            return None;
+        }
+        let selection_start = start.min(end);
+        let selection_end = start.max(end);
+        Some((chr.clone(), selection_start, selection_end))
+    }
+
+    fn ruler_rect(&self, rect: egui::Rect) -> Option<egui::Rect>
+    {
+        let mut y_offset = rect.top();
+        for track_type in &self.track_order
+        {
+            let config = self.track_configs.get(track_type)?;
+            if !config.visible
+            {
+                continue;
+            }
+
+            if *track_type == TrackType::Ruler
+            {
+                return Some(egui::Rect::from_min_size(
+                    egui::Pos2::new(rect.left(), y_offset),
+                    egui::Vec2::new(rect.width(), config.height),
+                ));
+            }
+
+            y_offset += config.height + TRACK_SPACING;
+        }
+        None
+    }
+
+    fn build_selection_fasta(&mut self) -> Result<(String, String)>
+    {
+        let (chr, start, end) = self
+            .active_selection()
+            .ok_or_else(|| anyhow::anyhow!("No selection available"))?;
+        let genome = self
+            .genome
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("No genome loaded"))?;
+        let chr_info = genome
+            .get_chromosome_info(&chr)
+            .ok_or_else(|| anyhow::anyhow!("Chromosome '{}' not found", chr))?;
+        if chr_info.length == 0
+        {
+            return Err(anyhow::anyhow!("Chromosome '{}' has no sequence", chr));
+        }
+
+        let max_index = chr_info.length.saturating_sub(1);
+        let start = start.min(max_index);
+        let end = end.min(max_index);
+        let end_exclusive = end.saturating_add(1).min(chr_info.length);
+        let sequence = genome.get_sequence_range(&chr, start, end_exclusive)?;
+
+        let header = format!(">{}:{}-{}", chr, start, end);
+        let fasta = format_fasta(&header, &sequence);
+        let filename = format!("{}_{}-{}.fasta", chr, start, end);
+        Ok((filename, fasta))
+    }
+
+    fn copy_selection_fasta(&mut self, ctx: &egui::Context)
+    {
+        match self.build_selection_fasta()
+        {
+            Ok((filename, fasta)) =>
+            {
+                ctx.output_mut(|o| o.copied_text = fasta);
+                self.status_message = format!("Copied selection to clipboard ({})", filename);
+            }
+            Err(e) =>
+            {
+                self.status_message = format!("Error preparing selection: {}", e);
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn download_selection_fasta(&mut self)
+    {
+        match self.build_selection_fasta()
+        {
+            Ok((filename, fasta)) =>
+            {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("FASTA", &["fasta", "fa", "fna", "ffn", "faa", "frn"])
+                    .set_file_name(&filename)
+                    .save_file()
+                {
+                    match std::fs::write(&path, fasta)
+                    {
+                        Ok(()) =>
+                        {
+                            self.status_message = format!(
+                                "Saved selection to {}",
+                                path.file_name().and_then(|n| n.to_str()).unwrap_or("file")
+                            );
+                        }
+                        Err(e) =>
+                        {
+                            self.status_message = format!("Error saving FASTA: {}", e);
+                        }
+                    }
+                }
+            }
+            Err(e) =>
+            {
+                self.status_message = format!("Error preparing selection: {}", e);
+            }
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn download_selection_fasta(&mut self)
+    {
+        use wasm_bindgen::JsCast;
+        use web_sys::HtmlAnchorElement;
+
+        match self.build_selection_fasta()
+        {
+            Ok((filename, fasta)) =>
+            {
+                if let Some(window) = web_sys::window()
+                {
+                    if let Some(document) = window.document()
+                    {
+                        let blob_parts = js_sys::Array::new();
+                        blob_parts.push(&wasm_bindgen::JsValue::from_str(&fasta));
+
+                        let mut blob_property_bag = web_sys::BlobPropertyBag::new();
+                        blob_property_bag.type_("text/plain");
+
+                        if let Ok(blob) = web_sys::Blob::new_with_str_sequence_and_options(
+                            &blob_parts,
+                            &blob_property_bag,
+                        )
+                        {
+                            if let Ok(url) = web_sys::Url::create_object_url_with_blob(&blob)
+                            {
+                                if let Ok(element) = document.create_element("a")
+                                {
+                                    if let Ok(anchor) = element.dyn_into::<HtmlAnchorElement>()
+                                    {
+                                        let _ = anchor.set_attribute("href", &url);
+                                        let _ = anchor.set_attribute("download", &filename);
+                                        anchor.click();
+                                        let _ = web_sys::Url::revoke_object_url(&url);
+                                        self.status_message =
+                                            format!("Downloaded selection ({})", filename);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) =>
+            {
+                self.status_message = format!("Error preparing selection: {}", e);
+            }
+        }
     }
 
     fn extract_chromosome_number(name: &str) -> Option<u32>
@@ -651,7 +859,9 @@ impl GenomeViewer
                             "Index files (.fai and .gzi) are required for loading FASTA files in the web version. \
                             Please ensure {}.fai exists (and {}.gzi for gzipped files). \
                             Error: {}",
-                            path, path, e
+                            path,
+                            path,
+                            e
                         ))
                     }
                 }
@@ -703,7 +913,8 @@ impl GenomeViewer
                             format!("Loaded {} chromosomes", genome.chromosomes.len());
 
                         // Set to first chromosome (only on initial load)
-                        if self.loading_chromosome.is_none() {
+                        if self.loading_chromosome.is_none()
+                        {
                             if let Some(first_chr) = genome.chromosomes.keys().next()
                             {
                                 self.selected_chromosome = Some(first_chr.clone());
@@ -715,13 +926,16 @@ impl GenomeViewer
                         }
 
                         // If we're restoring from a session, override with saved viewport
-                        if let Some((saved_chr, saved_start, saved_end)) = self.session_viewport.take()
+                        if let Some((saved_chr, saved_start, saved_end)) =
+                            self.session_viewport.take()
                         {
                             self.selected_chromosome = saved_chr.clone();
-                            
+
                             // Update viewport with correct max_length for the selected chromosome
-                            if let Some(chr_name) = &saved_chr {
-                                if let Some(chr_info) = genome.get_chromosome_info(chr_name) {
+                            if let Some(chr_name) = &saved_chr
+                            {
+                                if let Some(chr_info) = genome.get_chromosome_info(chr_name)
+                                {
                                     self.viewport = viewport::Viewport::new(0, chr_info.length);
                                 }
                             }
@@ -735,7 +949,8 @@ impl GenomeViewer
                     Err(e) =>
                     {
                         self.status_message = format!("Error loading FASTA: {}", e);
-                        if let Some(chr) = self.loading_chromosome.take() {
+                        if let Some(chr) = self.loading_chromosome.take()
+                        {
                             self.failed_chromosomes.insert(chr);
                         }
                     }
@@ -956,11 +1171,7 @@ impl GenomeViewer
 
         let promise = poll_promise::Promise::spawn_local(async move {
             let data = file_loader::load_file_async(&path).await?;
-            let track_name = path
-                .split('/')
-                .last()
-                .unwrap_or("Custom Track")
-                .to_string();
+            let track_name = path.split('/').last().unwrap_or("Custom Track").to_string();
             tsv::TsvData::from_bytes(data, track_name)
         });
 
@@ -1515,7 +1726,8 @@ impl GenomeViewer
                     }
                     Err(e) =>
                     {
-                        let _ = status_tx.send(Err(anyhow::anyhow!("Failed to read file: {:?}", e)));
+                        let _ =
+                            status_tx.send(Err(anyhow::anyhow!("Failed to read file: {:?}", e)));
                     }
                 }
             }
@@ -1616,23 +1828,20 @@ impl eframe::App for GenomeViewer
                                 let data = bytes.clone().to_vec();
                                 match String::from_utf8(data)
                                 {
-                                    Ok(json) =>
+                                    Ok(json) => match session::Session::from_json(&json)
                                     {
-                                        match session::Session::from_json(&json)
+                                        Ok(session) =>
                                         {
-                                            Ok(session) =>
-                                            {
-                                                self.status_message =
-                                                    format!("Session loaded from {}", name);
-                                                self.restore_session(session);
-                                            }
-                                            Err(e) =>
-                                            {
-                                                self.status_message =
-                                                    format!("Error loading session: {}", e);
-                                            }
+                                            self.status_message =
+                                                format!("Session loaded from {}", name);
+                                            self.restore_session(session);
                                         }
-                                    }
+                                        Err(e) =>
+                                        {
+                                            self.status_message =
+                                                format!("Error loading session: {}", e);
+                                        }
+                                    },
                                     Err(e) =>
                                     {
                                         self.status_message =
@@ -1644,6 +1853,11 @@ impl eframe::App for GenomeViewer
                     }
                 }
             });
+        }
+
+        if self.ruler_selection_chr.as_ref() != self.selected_chromosome.as_ref()
+        {
+            self.clear_ruler_selection();
         }
 
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
@@ -1681,19 +1895,25 @@ impl eframe::App for GenomeViewer
                     egui::ScrollArea::vertical().show(ui, |ui| {
                         // FASTA section
                         ui.horizontal(|ui| {
-                            ui.add_sized([100.0, 20.0], egui::Label::new(egui::RichText::new("📄 FASTA:").strong()));
+                            ui.add_sized(
+                                [100.0, 20.0],
+                                egui::Label::new(egui::RichText::new("📄 FASTA:").strong()),
+                            );
 
                             #[cfg(not(target_arch = "wasm32"))]
                             {
                                 if ui.button("Local").clicked()
                                 {
                                     if let Some(path) = rfd::FileDialog::new()
-                                        .add_filter("FASTA", &["fasta", "fa", "fna", "ffn", "faa", "frn"])
+                                        .add_filter(
+                                            "FASTA",
+                                            &["fasta", "fa", "fna", "ffn", "faa", "frn"],
+                                        )
                                         .add_filter(
                                             "FASTA (gzipped)",
                                             &[
-                                                "fasta.gz", "fa.gz", "fna.gz", "ffn.gz", "faa.gz", "frn.gz",
-                                                "gz",
+                                                "fasta.gz", "fa.gz", "fna.gz", "ffn.gz", "faa.gz",
+                                                "frn.gz", "gz",
                                             ],
                                         )
                                         .add_filter("All files", &["*"])
@@ -1705,7 +1925,11 @@ impl eframe::App for GenomeViewer
                                 }
 
                                 ui.label("URL:");
-                                ui.add_sized([300.0, 20.0], egui::TextEdit::singleline(&mut self.fasta_path).hint_text("https://..."));
+                                ui.add_sized(
+                                    [300.0, 20.0],
+                                    egui::TextEdit::singleline(&mut self.fasta_path)
+                                        .hint_text("https://..."),
+                                );
                                 if ui.button("Load URL").clicked()
                                 {
                                     self.load_fasta();
@@ -1717,7 +1941,7 @@ impl eframe::App for GenomeViewer
                                         std::path::Path::new(&self.fasta_path)
                                             .file_name()
                                             .and_then(|n| n.to_str())
-                                            .unwrap_or(&self.fasta_path)
+                                            .unwrap_or(&self.fasta_path),
                                     );
                                 }
                             }
@@ -1745,7 +1969,10 @@ impl eframe::App for GenomeViewer
 
                         // GFF/GTF section
                         ui.horizontal(|ui| {
-                            ui.add_sized([100.0, 20.0], egui::Label::new(egui::RichText::new("📄 GFF/GTF:").strong()));
+                            ui.add_sized(
+                                [100.0, 20.0],
+                                egui::Label::new(egui::RichText::new("📄 GFF/GTF:").strong()),
+                            );
 
                             #[cfg(not(target_arch = "wasm32"))]
                             {
@@ -1753,7 +1980,10 @@ impl eframe::App for GenomeViewer
                                 {
                                     if let Some(path) = rfd::FileDialog::new()
                                         .add_filter("GFF/GTF", &["gff", "gff3", "gtf"])
-                                        .add_filter("GFF/GTF (gzipped)", &["gff.gz", "gff3.gz", "gtf.gz", "gz"])
+                                        .add_filter(
+                                            "GFF/GTF (gzipped)",
+                                            &["gff.gz", "gff3.gz", "gtf.gz", "gz"],
+                                        )
                                         .add_filter("All files", &["*"])
                                         .pick_file()
                                     {
@@ -1763,7 +1993,11 @@ impl eframe::App for GenomeViewer
                                 }
 
                                 ui.label("URL:");
-                                ui.add_sized([300.0, 20.0], egui::TextEdit::singleline(&mut self.gff_path).hint_text("https://..."));
+                                ui.add_sized(
+                                    [300.0, 20.0],
+                                    egui::TextEdit::singleline(&mut self.gff_path)
+                                        .hint_text("https://..."),
+                                );
                                 if ui.button("Load URL").clicked()
                                 {
                                     self.load_gff();
@@ -1775,7 +2009,7 @@ impl eframe::App for GenomeViewer
                                         std::path::Path::new(&self.gff_path)
                                             .file_name()
                                             .and_then(|n| n.to_str())
-                                            .unwrap_or(&self.gff_path)
+                                            .unwrap_or(&self.gff_path),
                                     );
                                 }
                             }
@@ -1803,7 +2037,10 @@ impl eframe::App for GenomeViewer
 
                         // BAM sequencing section
                         ui.horizontal(|ui| {
-                            ui.add_sized([100.0, 20.0], egui::Label::new(egui::RichText::new("📊 BAM:").strong()));
+                            ui.add_sized(
+                                [100.0, 20.0],
+                                egui::Label::new(egui::RichText::new("📊 BAM:").strong()),
+                            );
 
                             #[cfg(not(target_arch = "wasm32"))]
                             {
@@ -1820,7 +2057,11 @@ impl eframe::App for GenomeViewer
                                 }
 
                                 ui.label("URL:");
-                                ui.add_sized([300.0, 20.0], egui::TextEdit::singleline(&mut self.bam_path).hint_text("https://..."));
+                                ui.add_sized(
+                                    [300.0, 20.0],
+                                    egui::TextEdit::singleline(&mut self.bam_path)
+                                        .hint_text("https://..."),
+                                );
                                 if ui.button("Load URL").clicked()
                                 {
                                     self.load_bam();
@@ -1832,7 +2073,7 @@ impl eframe::App for GenomeViewer
                                         std::path::Path::new(&self.bam_path)
                                             .file_name()
                                             .and_then(|n| n.to_str())
-                                            .unwrap_or(&self.bam_path)
+                                            .unwrap_or(&self.bam_path),
                                     );
                                 }
                             }
@@ -1860,7 +2101,10 @@ impl eframe::App for GenomeViewer
 
                         // TSV custom track section
                         ui.horizontal(|ui| {
-                            ui.add_sized([100.0, 20.0], egui::Label::new(egui::RichText::new("📈 TSV:").strong()));
+                            ui.add_sized(
+                                [100.0, 20.0],
+                                egui::Label::new(egui::RichText::new("📈 TSV:").strong()),
+                            );
 
                             #[cfg(not(target_arch = "wasm32"))]
                             {
@@ -1882,7 +2126,7 @@ impl eframe::App for GenomeViewer
                                         std::path::Path::new(&self.tsv_path)
                                             .file_name()
                                             .and_then(|n| n.to_str())
-                                            .unwrap_or(&self.tsv_path)
+                                            .unwrap_or(&self.tsv_path),
                                     );
                                 }
                             }
@@ -1913,7 +2157,8 @@ impl eframe::App for GenomeViewer
                         .hint_text("chr1:100000 or 100000")
                         .desired_width(150.0),
                 );
-                let go_to_enter = go_to_response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let go_to_enter =
+                    go_to_response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 if ui.button("🔍 Jump").clicked() || go_to_enter
                 {
                     self.search_position();
@@ -1927,7 +2172,8 @@ impl eframe::App for GenomeViewer
                         .hint_text("gene name, ID...")
                         .desired_width(150.0),
                 );
-                let feature_enter = feature_response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let feature_enter =
+                    feature_response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 if ui.button("🔍 Search").clicked() || feature_enter
                 {
                     self.search_features();
@@ -1961,6 +2207,44 @@ impl eframe::App for GenomeViewer
                         ));
                     }
                 });
+
+                if let Some((chr, start, end)) = self.active_selection()
+                {
+                    let length = end.saturating_sub(start) + 1;
+                    let mut copy_selection = false;
+                    let mut download_selection = false;
+                    let mut clear_selection = false;
+
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.label(format!("Selection: {}:{}-{} ({} bp)", chr, start, end, length));
+                        if ui.button("Copy FASTA").clicked()
+                        {
+                            copy_selection = true;
+                        }
+                        if ui.button("Download FASTA").clicked()
+                        {
+                            download_selection = true;
+                        }
+                        if ui.button("Clear").clicked()
+                        {
+                            clear_selection = true;
+                        }
+                    });
+
+                    if copy_selection
+                    {
+                        self.copy_selection_fasta(ctx);
+                    }
+                    if download_selection
+                    {
+                        self.download_selection_fasta();
+                    }
+                    if clear_selection
+                    {
+                        self.clear_ruler_selection();
+                    }
+                }
 
                 // Show loading progress if active
                 if let Some(ref progress) = self.loading_progress
@@ -2009,85 +2293,88 @@ impl eframe::App for GenomeViewer
                     ui.heading("Chromosomes");
                     ui.separator();
 
-                if self.genome.is_some()
-                {
-                    // Search box
-                    ui.horizontal(|ui| {
-                        ui.label("🔍");
-                        ui.text_edit_singleline(&mut self.chromosome_search);
-                        if ui.button("✖").clicked()
-                        {
-                            self.chromosome_search.clear();
-                        }
-                    });
-
-                    ui.separator();
-
-                    // Sort options
-                    ui.horizontal(|ui| {
-                        ui.label("Sort:");
-                        if ui
-                            .selectable_label(
-                                self.chromosome_sort == ChromosomeSort::Natural,
-                                "Natural",
-                            )
-                            .clicked()
-                        {
-                            self.chromosome_sort = ChromosomeSort::Natural;
-                        }
-                        if ui
-                            .selectable_label(
-                                self.chromosome_sort == ChromosomeSort::Alphabetical,
-                                "A-Z",
-                            )
-                            .clicked()
-                        {
-                            self.chromosome_sort = ChromosomeSort::Alphabetical;
-                        }
-                        if ui
-                            .selectable_label(self.chromosome_sort == ChromosomeSort::Size, "Size")
-                            .clicked()
-                        {
-                            self.chromosome_sort = ChromosomeSort::Size;
-                        }
-                    });
-
-                    ui.separator();
-
-                    // Chromosome list
-                    let chromosomes = self.get_sorted_chromosomes();
-
-                    if chromosomes.is_empty()
+                    if self.genome.is_some()
                     {
-                        ui.label("No chromosomes found");
+                        // Search box
+                        ui.horizontal(|ui| {
+                            ui.label("🔍");
+                            ui.text_edit_singleline(&mut self.chromosome_search);
+                            if ui.button("✖").clicked()
+                            {
+                                self.chromosome_search.clear();
+                            }
+                        });
+
+                        ui.separator();
+
+                        // Sort options
+                        ui.horizontal(|ui| {
+                            ui.label("Sort:");
+                            if ui
+                                .selectable_label(
+                                    self.chromosome_sort == ChromosomeSort::Natural,
+                                    "Natural",
+                                )
+                                .clicked()
+                            {
+                                self.chromosome_sort = ChromosomeSort::Natural;
+                            }
+                            if ui
+                                .selectable_label(
+                                    self.chromosome_sort == ChromosomeSort::Alphabetical,
+                                    "A-Z",
+                                )
+                                .clicked()
+                            {
+                                self.chromosome_sort = ChromosomeSort::Alphabetical;
+                            }
+                            if ui
+                                .selectable_label(
+                                    self.chromosome_sort == ChromosomeSort::Size,
+                                    "Size",
+                                )
+                                .clicked()
+                            {
+                                self.chromosome_sort = ChromosomeSort::Size;
+                            }
+                        });
+
+                        ui.separator();
+
+                        // Chromosome list
+                        let chromosomes = self.get_sorted_chromosomes();
+
+                        if chromosomes.is_empty()
+                        {
+                            ui.label("No chromosomes found");
+                        }
+                        else
+                        {
+                            ui.label(format!("{} chromosome(s)", chromosomes.len()));
+                            egui::ScrollArea::vertical().show(ui, |ui| {
+                                for (chr_name, chr_length) in chromosomes
+                                {
+                                    let is_selected =
+                                        self.selected_chromosome.as_ref() == Some(&chr_name);
+                                    if ui
+                                        .selectable_label(
+                                            is_selected,
+                                            format!("{} ({} bp)", chr_name, chr_length),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.selected_chromosome = Some(chr_name.clone());
+                                        self.viewport = viewport::Viewport::new(0, chr_length);
+                                    }
+                                }
+                            });
+                        }
                     }
                     else
                     {
-                        ui.label(format!("{} chromosome(s)", chromosomes.len()));
-                        egui::ScrollArea::vertical().show(ui, |ui| {
-                            for (chr_name, chr_length) in chromosomes
-                            {
-                                let is_selected =
-                                    self.selected_chromosome.as_ref() == Some(&chr_name);
-                                if ui
-                                    .selectable_label(
-                                        is_selected,
-                                        format!("{} ({} bp)", chr_name, chr_length),
-                                    )
-                                    .clicked()
-                                {
-                                    self.selected_chromosome = Some(chr_name.clone());
-                                    self.viewport = viewport::Viewport::new(0, chr_length);
-                                }
-                            }
-                        });
+                        ui.label("No genome loaded");
                     }
-                }
-                else
-                {
-                    ui.label("No genome loaded");
-                }
-            });
+                });
         }
 
         // Search results window
@@ -2165,18 +2452,22 @@ impl eframe::App for GenomeViewer
                                         ui.label(egui::RichText::new(&track_name).strong());
 
                                         // Reorder buttons
-                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                            if idx < ordered_tracks.len() - 1 && ui.button("▼").clicked()
-                                            {
-                                                // Move down
-                                                self.track_order.swap(idx, idx + 1);
-                                            }
-                                            if idx > 0 && ui.button("▲").clicked()
-                                            {
-                                                // Move up
-                                                self.track_order.swap(idx, idx - 1);
-                                            }
-                                        });
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                if idx < ordered_tracks.len() - 1
+                                                    && ui.button("▼").clicked()
+                                                {
+                                                    // Move down
+                                                    self.track_order.swap(idx, idx + 1);
+                                                }
+                                                if idx > 0 && ui.button("▲").clicked()
+                                                {
+                                                    // Move up
+                                                    self.track_order.swap(idx, idx - 1);
+                                                }
+                                            },
+                                        );
                                     });
 
                                     // Height slider for adjustable tracks
@@ -2190,19 +2481,27 @@ impl eframe::App for GenomeViewer
                                         | TrackType::Methylation
                                         | TrackType::CustomTsv =>
                                         {
-                                            let config_mut = self.track_configs.get_mut(&track_type).unwrap();
+                                            let config_mut =
+                                                self.track_configs.get_mut(&track_type).unwrap();
                                             ui.horizontal(|ui| {
                                                 ui.label("Height:");
                                                 ui.add(
-                                                    egui::Slider::new(&mut config_mut.height, 20.0..=500.0)
-                                                        .text("px"),
+                                                    egui::Slider::new(
+                                                        &mut config_mut.height,
+                                                        20.0..=500.0,
+                                                    )
+                                                    .text("px"),
                                                 );
                                             });
 
                                             // Show current height
-                                            ui.label(format!("Current: {:.0} px", config_mut.height));
+                                            ui.label(format!(
+                                                "Current: {:.0} px",
+                                                config_mut.height
+                                            ));
                                         }
-                                        _ => {}
+                                        _ =>
+                                        {}
                                     }
 
                                     // Alignments-specific controls
@@ -2212,16 +2511,23 @@ impl eframe::App for GenomeViewer
                                         ui.label("Max reads to display:");
                                         ui.horizontal(|ui| {
                                             ui.add(
-                                                egui::Slider::new(&mut self.max_reads_display, 100..=50000)
-                                                    .logarithmic(true)
-                                                    .text("reads"),
+                                                egui::Slider::new(
+                                                    &mut self.max_reads_display,
+                                                    100..=50000,
+                                                )
+                                                .logarithmic(true)
+                                                .text("reads"),
                                             );
                                         });
-                                        ui.label(format!("Current: {} reads", self.max_reads_display));
+                                        ui.label(format!(
+                                            "Current: {} reads",
+                                            self.max_reads_display
+                                        ));
                                     }
 
                                     // Visibility toggle
-                                    let config_mut = self.track_configs.get_mut(&track_type).unwrap();
+                                    let config_mut =
+                                        self.track_configs.get_mut(&track_type).unwrap();
                                     ui.checkbox(&mut config_mut.visible, "Visible");
                                 });
 
@@ -2269,8 +2575,86 @@ impl eframe::App for GenomeViewer
             let (response, painter) =
                 ui.allocate_painter(available_size, egui::Sense::click_and_drag());
 
+            let ruler_rect = if self.genome.is_some() && self.selected_chromosome.is_some()
+            {
+                self.ruler_rect(response.rect)
+            }
+            else
+            {
+                None
+            };
+            let pointer_pos = response.interact_pointer_pos();
+
+            if let Some(ruler_rect) = ruler_rect
+            {
+                if response.drag_started()
+                {
+                    if let Some(pos) = pointer_pos
+                    {
+                        if ruler_rect.contains(pos)
+                        {
+                            let screen_x =
+                                (pos.x - response.rect.left()).clamp(0.0, response.rect.width());
+                            let mut base = self
+                                .viewport
+                                .screen_to_position(screen_x, response.rect.width());
+                            if self.viewport.end > 0
+                            {
+                                base = base.min(self.viewport.end.saturating_sub(1));
+                            }
+                            self.ruler_selection_drag = Some(base);
+                            self.ruler_selection = Some((base, base));
+                            self.ruler_selection_chr = self.selected_chromosome.clone();
+                        }
+                    }
+                }
+
+                if response.clicked()
+                {
+                    if let Some(pos) = pointer_pos
+                    {
+                        if ruler_rect.contains(pos)
+                        {
+                            let screen_x =
+                                (pos.x - response.rect.left()).clamp(0.0, response.rect.width());
+                            let mut base = self
+                                .viewport
+                                .screen_to_position(screen_x, response.rect.width());
+                            if self.viewport.end > 0
+                            {
+                                base = base.min(self.viewport.end.saturating_sub(1));
+                            }
+                            self.ruler_selection = Some((base, base));
+                            self.ruler_selection_chr = self.selected_chromosome.clone();
+                        }
+                    }
+                }
+
+                if response.dragged()
+                {
+                    if let (Some(anchor), Some(pos)) = (self.ruler_selection_drag, pointer_pos)
+                    {
+                        let screen_x =
+                            (pos.x - response.rect.left()).clamp(0.0, response.rect.width());
+                        let mut base = self
+                            .viewport
+                            .screen_to_position(screen_x, response.rect.width());
+                        if self.viewport.end > 0
+                        {
+                            base = base.min(self.viewport.end.saturating_sub(1));
+                        }
+                        self.ruler_selection = Some((anchor, base));
+                    }
+                }
+
+                if response.drag_released()
+                {
+                    self.ruler_selection_drag = None;
+                }
+            }
+
             // Handle pan and zoom
-            if response.dragged()
+            if response.dragged() && self.ruler_selection_drag.is_none()
             {
                 let delta = response.drag_delta();
                 let pixels_per_base =
@@ -2309,6 +2693,8 @@ impl eframe::App for GenomeViewer
                 }
             }
 
+            let selection_for_ruler = self.active_selection().map(|(_, start, end)| (start, end));
+
             // Render genome using track configuration
             if let (Some(ref mut genome), Some(ref chr_name)) =
                 (&mut self.genome, &self.selected_chromosome)
@@ -2317,13 +2703,15 @@ impl eframe::App for GenomeViewer
                 if let Err(e) = genome.ensure_chromosome_loaded(chr_name)
                 {
                     #[cfg(target_arch = "wasm32")]
-                    if e.to_string().contains("WASM indexed genome requires async loading")
+                    if e.to_string()
+                        .contains("WASM indexed genome requires async loading")
                     {
                         // Check if we are already loading this chromosome
                         let is_loading = self.loading_chromosome.as_deref() == Some(chr_name);
                         let has_failed = self.failed_chromosomes.contains(chr_name);
 
-                        if !is_loading && !has_failed {
+                        if !is_loading && !has_failed
+                        {
                             self.status_message = format!("Loading chromosome {}...", chr_name);
                             self.loading_progress = Some(LoadingProgress {
                                 description: format!("Loading {}...", chr_name),
@@ -2336,9 +2724,12 @@ impl eframe::App for GenomeViewer
                             // Clone genome to move into async block (it's cheap for indexed genomes)
                             let mut genome_clone = genome.clone();
                             let promise = poll_promise::Promise::spawn_local(async move {
-                                genome_clone.load_chromosome_async(&chr).await.map(|_| genome_clone)
+                                genome_clone
+                                    .load_chromosome_async(&chr)
+                                    .await
+                                    .map(|_| genome_clone)
                             });
-                            
+
                             *self.genome_promise.lock() = Some(promise);
                         }
                         else if has_failed
@@ -2363,7 +2754,11 @@ impl eframe::App for GenomeViewer
                     // Query BAM region once if needed
                     let bam_track = if let Some(ref mut alignments) = self.alignments
                     {
-                        match alignments.query_region(chr_name, self.viewport.start, self.viewport.end)
+                        match alignments.query_region(
+                            chr_name,
+                            self.viewport.start,
+                            self.viewport.end,
+                        )
                         {
                             Ok(track) => track,
                             Err(e) =>
@@ -2379,12 +2774,13 @@ impl eframe::App for GenomeViewer
                     };
 
                     // Get TSV track if available
-                    let tsv_track = self.tsv_data.as_ref()
+                    let tsv_track = self
+                        .tsv_data
+                        .as_ref()
                         .and_then(|data| data.tracks.get(chr_name));
 
                     // Render tracks in configured order
                     let mut y_offset = response.rect.top();
-                    const TRACK_SPACING: f32 = 10.0;
 
                     for &track_type in &self.track_order
                     {
@@ -2405,6 +2801,7 @@ impl eframe::App for GenomeViewer
                                     y_offset,
                                     config.height,
                                     chr_name,
+                                    selection_for_ruler,
                                 );
                                 y_offset += TRACK_SPACING;
                             }
