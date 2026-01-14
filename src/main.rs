@@ -405,6 +405,41 @@ impl GenomeViewer
         ]
     }
 
+    fn normalize_viewport_region(max_length: usize, start: usize, end: usize) -> (usize, usize)
+    {
+        let start = start.min(max_length);
+        let end = end.min(max_length);
+        let (mut start, mut end) = if end >= start
+        {
+            (start, end)
+        }
+        else
+        {
+            (end, start)
+        };
+        if start == end && max_length > 0
+        {
+            end = (start + 1).min(max_length);
+        }
+        (start, end)
+    }
+
+    fn apply_saved_viewport(&mut self, max_length: Option<usize>, start: usize, end: usize)
+    {
+        if let Some(max_length) = max_length
+        {
+            self.viewport = viewport::Viewport::new(0, max_length);
+            let (start, end) = Self::normalize_viewport_region(max_length, start, end);
+            self.viewport.start = start;
+            self.viewport.end = end;
+        }
+        else
+        {
+            self.viewport.start = start;
+            self.viewport.end = end;
+        }
+    }
+
     fn clear_ruler_selection(&mut self)
     {
         self.ruler_selection = None;
@@ -931,48 +966,12 @@ impl GenomeViewer
                         {
                             self.selected_chromosome = saved_chr.clone();
 
-                            // Update viewport with correct max_length for the selected chromosome
-                            if let Some(chr_name) = &saved_chr
-                            {
-                                if let Some(chr_info) = genome.get_chromosome_info(chr_name)
-                                {
-                                    self.viewport = viewport::Viewport::new(0, chr_info.length);
-                                }
-                            }
-
-                            if let Some(chr_name) = &saved_chr
-                            {
-                                if let Some(chr_info) = genome.get_chromosome_info(chr_name)
-                                {
-                                    let max_length = chr_info.length;
-                                    let start = saved_start.min(max_length);
-                                    let end = saved_end.min(max_length);
-                                    let (mut start, mut end) = if end >= start
-                                    {
-                                        (start, end)
-                                    }
-                                    else
-                                    {
-                                        (end, start)
-                                    };
-                                    if start == end && max_length > 0
-                                    {
-                                        end = (start + 1).min(max_length);
-                                    }
-                                    self.viewport.start = start;
-                                    self.viewport.end = end;
-                                }
-                                else
-                                {
-                                    self.viewport.start = saved_start;
-                                    self.viewport.end = saved_end;
-                                }
-                            }
-                            else
-                            {
-                                self.viewport.start = saved_start;
-                                self.viewport.end = saved_end;
-                            }
+                            let max_length = saved_chr
+                                .as_ref()
+                                .and_then(|chr_name| {
+                                    genome.get_chromosome_info(chr_name).map(|info| info.length)
+                                });
+                            self.apply_saved_viewport(max_length, saved_start, saved_end);
                         }
                         self.genome = Some(genome.clone());
                         self.loading_chromosome = None;
@@ -1612,41 +1611,22 @@ impl GenomeViewer
         {
             self.selected_chromosome = session.selected_chromosome.clone();
 
-            if let (Some(ref genome), Some(ref chr_name)) =
-                (&self.genome, &session.selected_chromosome)
-            {
-                if let Some(chr_info) = genome.get_chromosome_info(chr_name)
-                {
-                    self.viewport = viewport::Viewport::new(0, chr_info.length);
-                    let max_length = chr_info.length;
-                    let start = session.viewport_start.min(max_length);
-                    let end = session.viewport_end.min(max_length);
-                    let (mut start, mut end) = if end >= start
-                    {
-                        (start, end)
-                    }
-                    else
-                    {
-                        (end, start)
-                    };
-                    if start == end && max_length > 0
-                    {
-                        end = (start + 1).min(max_length);
-                    }
-                    self.viewport.start = start;
-                    self.viewport.end = end;
-                }
-                else
-                {
-                    self.viewport.start = session.viewport_start;
-                    self.viewport.end = session.viewport_end;
-                }
-            }
-            else
-            {
-                self.viewport.start = session.viewport_start;
-                self.viewport.end = session.viewport_end;
-            }
+            let max_length = self
+                .genome
+                .as_ref()
+                .and_then(|genome| {
+                    session
+                        .selected_chromosome
+                        .as_ref()
+                        .and_then(|chr_name| {
+                            genome.get_chromosome_info(chr_name).map(|info| info.length)
+                        })
+                });
+            self.apply_saved_viewport(
+                max_length,
+                session.viewport_start,
+                session.viewport_end,
+            );
         }
     }
 
