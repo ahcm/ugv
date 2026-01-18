@@ -396,6 +396,17 @@ impl GenomeViewer
         configs
     }
 
+    fn sync_track_order(&mut self)
+    {
+        for (idx, track_type) in self.track_order.iter().enumerate()
+        {
+            if let Some(config) = self.track_configs.get_mut(track_type)
+            {
+                config.order = idx;
+            }
+        }
+    }
+
     fn default_track_order() -> Vec<TrackType>
     {
         vec![
@@ -2594,10 +2605,10 @@ impl eframe::App for GenomeViewer
                     ui.separator();
 
                     egui::ScrollArea::vertical().show(ui, |ui| {
-                        // Get tracks in order
-                        let ordered_tracks: Vec<_> = self.track_order.clone();
+                        let ordered_len = self.track_order.len();
+                        let mut reorder_action: Option<(usize, usize)> = None;
 
-                        for (idx, &track_type) in ordered_tracks.iter().enumerate()
+                        for (idx, &track_type) in self.track_order.iter().enumerate()
                         {
                             if self.track_configs.contains_key(&track_type)
                             {
@@ -2611,16 +2622,22 @@ impl eframe::App for GenomeViewer
                                         ui.with_layout(
                                             egui::Layout::right_to_left(egui::Align::Center),
                                             |ui| {
-                                                if idx < ordered_tracks.len() - 1
+                                                if idx < ordered_len - 1
                                                     && ui.button("▼").clicked()
                                                 {
                                                     // Move down
-                                                    self.track_order.swap(idx, idx + 1);
+                                                    if reorder_action.is_none()
+                                                    {
+                                                        reorder_action = Some((idx, idx + 1));
+                                                    }
                                                 }
                                                 if idx > 0 && ui.button("▲").clicked()
                                                 {
                                                     // Move up
-                                                    self.track_order.swap(idx, idx - 1);
+                                                    if reorder_action.is_none()
+                                                    {
+                                                        reorder_action = Some((idx, idx - 1));
+                                                    }
                                                 }
                                             },
                                         );
@@ -2709,11 +2726,18 @@ impl eframe::App for GenomeViewer
                             }
                         }
 
+                        if let Some((from, to)) = reorder_action
+                        {
+                            self.track_order.swap(from, to);
+                            self.sync_track_order();
+                        }
+
                         ui.separator();
                         if ui.button("Reset to Defaults").clicked()
                         {
                             self.track_configs = Self::default_track_configs();
                             self.track_order = Self::default_track_order();
+                            self.sync_track_order();
                         }
                     });
                 });
