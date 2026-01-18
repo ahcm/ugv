@@ -1296,7 +1296,8 @@ pub fn draw_tsv_track(
         return track_rect.bottom();
     }
 
-    let label_y = y_offset + height / 2.0;
+    let marker_y = y_offset + height * 0.35;
+    let label_y = y_offset + height * 0.65;
     let view_span = (viewport.end - viewport.start) as f32;
     let font_family = if use_monospace
     {
@@ -1315,6 +1316,30 @@ pub fn draw_tsv_track(
         let end_x = rect.left()
             + ((point.end.saturating_sub(viewport.start)) as f32 / view_span) * rect.width();
         let center_x = (start_x + end_x) * 0.5;
+        let marker_start = start_x.min(end_x);
+        let marker_end = start_x.max(end_x);
+
+        painter.line_segment(
+            [
+                Pos2::new(marker_start, marker_y),
+                Pos2::new(marker_end, marker_y),
+            ],
+            Stroke::new(1.5, Color32::from_rgb(50, 100, 200)),
+        );
+        painter.line_segment(
+            [
+                Pos2::new(marker_start, marker_y - 4.0),
+                Pos2::new(marker_start, marker_y + 4.0),
+            ],
+            Stroke::new(1.5, Color32::from_rgb(50, 100, 200)),
+        );
+        painter.line_segment(
+            [
+                Pos2::new(marker_end, marker_y - 4.0),
+                Pos2::new(marker_end, marker_y + 4.0),
+            ],
+            Stroke::new(1.5, Color32::from_rgb(50, 100, 200)),
+        );
 
         painter.text(
             Pos2::new(center_x, label_y),
