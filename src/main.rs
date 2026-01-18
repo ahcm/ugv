@@ -2804,8 +2804,13 @@ impl eframe::App for GenomeViewer
                                         ui.with_layout(
                                             egui::Layout::right_to_left(egui::Align::Center),
                                             |ui| {
-                                                if idx < ordered_len - 1
-                                                    && ui.button("▼").clicked()
+                                                let can_move_down = idx < ordered_len - 1;
+                                                if ui
+                                                    .add_enabled(
+                                                        can_move_down,
+                                                        egui::Button::new("Down"),
+                                                    )
+                                                    .clicked()
                                                 {
                                                     // Move down
                                                     if reorder_action.is_none()
@@ -2813,7 +2818,13 @@ impl eframe::App for GenomeViewer
                                                         reorder_action = Some((idx, idx + 1));
                                                     }
                                                 }
-                                                if idx > 0 && ui.button("▲").clicked()
+                                                let can_move_up = idx > 0;
+                                                if ui
+                                                    .add_enabled(
+                                                        can_move_up,
+                                                        egui::Button::new("Up"),
+                                                    )
+                                                    .clicked()
                                                 {
                                                     // Move up
                                                     if reorder_action.is_none()
