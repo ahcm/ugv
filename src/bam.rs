@@ -9,9 +9,10 @@ use noodles::sam;
 use std::io::Cursor;
 
 // Memory management constants
-const MAX_LOADED_REGION_SIZE: usize = 100_000_000; // 10MB max region
+const MAX_LOADED_REGION_SIZE: usize = 10_000_000; // 10Mb max region
 const MAX_LOADED_ALIGNMENTS: usize = 500_000; // Max 100k reads
-const VIEWPORT_BUFFER: usize = 50_000_000; // ±2Mb buffer around viewport
+const VIEWPORT_BUFFER_MIN: usize = 100_000; // 100Kb min buffer around viewport
+const VIEWPORT_BUFFER_MAX: usize = 2_000_000; // 2Mb max buffer around viewport
 
 /// CIGAR operation types
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -365,6 +366,7 @@ pub struct AlignmentData
 
     // Currently loaded tracks (only for displayed region)
     pub loaded_tracks: HashMap<String, AlignmentTrack>,
+    pub previous_tracks: HashMap<String, AlignmentTrack>,
 }
 
 impl AlignmentData
@@ -400,6 +402,7 @@ impl AlignmentData
             header,
             reference_lengths,
             loaded_tracks: HashMap::new(),
+            previous_tracks: HashMap::new(),
         })
     }
 
@@ -417,7 +420,29 @@ impl AlignmentData
             header,
             reference_lengths,
             loaded_tracks: HashMap::new(),
+            previous_tracks: HashMap::new(),
         })
+    }
+
+    fn buffered_region(
+        &self,
+        viewport_start: usize,
+        viewport_end: usize,
+        reference_length: usize,
+    ) -> (usize, usize)
+    {
+        let viewport_size = viewport_end.saturating_sub(viewport_start);
+        let buffer = (viewport_size / 2).clamp(VIEWPORT_BUFFER_MIN, VIEWPORT_BUFFER_MAX);
+        let buffer_start = viewport_start.saturating_sub(buffer);
+        let buffer_end = if reference_length == 0
+        {
+            viewport_end.saturating_add(buffer)
+        }
+        else
+        {
+            (viewport_end + buffer).min(reference_length)
+        };
+        (buffer_start, buffer_end)
     }
 
     /// Query a specific region - loads from BAM if not already cached
@@ -429,17 +454,9 @@ impl AlignmentData
         viewport_end: usize,
     ) -> Result<Option<&AlignmentTrack>>
     {
-        // Calculate region with buffer
-        let buffer_start = viewport_start.saturating_sub(VIEWPORT_BUFFER);
         let reference_length = self.reference_length(chromosome);
-        let buffer_end = if reference_length == 0
-        {
-            viewport_end.saturating_add(VIEWPORT_BUFFER)
-        }
-        else
-        {
-            (viewport_end + VIEWPORT_BUFFER).min(reference_length)
-        };
+        let (buffer_start, buffer_end) =
+            self.buffered_region(viewport_start, viewport_end, reference_length);
 
         // Limit region size
         let region_size = buffer_end - buffer_start;
@@ -450,21 +467,28 @@ impl AlignmentData
         }
 
         // Check if we need to load (avoid borrow checker issues)
-        let need_load = if let Some(track) = self.loaded_tracks.get(chromosome)
+        let mut need_load = true;
+        if let Some(track) = self.loaded_tracks.get(chromosome)
         {
             if let Some((loaded_start, loaded_end)) = track.loaded_region
             {
                 // Check if requested region is outside loaded region
-                buffer_start < loaded_start || buffer_end > loaded_end
-            }
-            else
-            {
-                true
+                need_load = buffer_start < loaded_start || buffer_end > loaded_end;
             }
         }
-        else
+        else if let Some(track) = self.previous_tracks.get(chromosome)
         {
-            true
+            if let Some((loaded_start, loaded_end)) = track.loaded_region
+            {
+                if buffer_start >= loaded_start && buffer_end <= loaded_end
+                {
+                    if let Some(track) = self.previous_tracks.remove(chromosome)
+                    {
+                        self.loaded_tracks.insert(chromosome.to_string(), track);
+                        need_load = false;
+                    }
+                }
+            }
         };
 
         // Load if needed
@@ -586,6 +610,11 @@ impl AlignmentData
         track.compute_methylation(100); // 100bp bins
 
         // Store in loaded_tracks, replacing any previous data for this chromosome
+        if let Some(existing) = self.loaded_tracks.remove(chromosome)
+        {
+            self.previous_tracks
+                .insert(chromosome.to_string(), existing);
+        }
         self.loaded_tracks.insert(chromosome.to_string(), track);
 
         Ok(())
