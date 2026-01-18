@@ -202,6 +202,8 @@ struct GenomeViewer
     show_search_results: bool,
     show_chromosome_panel: bool,
     dragging_track: Option<TrackType>,
+    last_viewport_rect: Option<egui::Rect>,
+    export_request: Option<ExportRequest>,
     // BAM support
     alignments: Option<bam::AlignmentData>,
     bam_path: String,
@@ -243,6 +245,21 @@ struct GenomeViewer
     failed_chromosomes: std::collections::HashSet<String>,
     #[cfg(target_arch = "wasm32")]
     loading_chromosome: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ExportFormat
+{
+    Png,
+    Svg,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ExportRequest
+{
+    format: ExportFormat,
+    rect: egui::Rect,
+    pixels_per_point: f32,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -353,6 +370,8 @@ impl GenomeViewer
             show_search_results: false,
             show_chromosome_panel: true,
             dragging_track: None,
+            last_viewport_rect: None,
+            export_request: None,
             // BAM support
             alignments: None,
             bam_path: String::new(),
@@ -478,6 +497,247 @@ impl GenomeViewer
             self.viewport.start = start;
             self.viewport.end = end;
         }
+    }
+
+    fn export_filename(&self, extension: &str) -> String
+    {
+        let (start, end) = (self.viewport.start, self.viewport.end);
+        if let Some(ref chr) = self.selected_chromosome
+        {
+            format!("{}_{}-{}.{}", chr, start, end, extension)
+        }
+        else
+        {
+            format!("viewport_{}-{}.{}", start, end, extension)
+        }
+    }
+
+    fn request_export(&mut self, ctx: &egui::Context, format: ExportFormat)
+    {
+        let rect = match self.last_viewport_rect
+        {
+            Some(rect) => rect,
+            None =>
+            {
+                self.status_message = "Viewport not ready for export".to_string();
+                return;
+            }
+        };
+        self.export_request = Some(ExportRequest {
+            format,
+            rect,
+            pixels_per_point: ctx.pixels_per_point(),
+        });
+        ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
+        self.status_message = "Capturing viewport...".to_string();
+    }
+
+    fn crop_color_image(
+        &self,
+        image: &egui::ColorImage,
+        rect: egui::Rect,
+        pixels_per_point: f32,
+    ) -> Option<egui::ColorImage>
+    {
+        let width = image.width() as i32;
+        let height = image.height() as i32;
+
+        let x0 = (rect.left() * pixels_per_point).round() as i32;
+        let y0 = (rect.top() * pixels_per_point).round() as i32;
+        let x1 = (rect.right() * pixels_per_point).round() as i32;
+        let y1 = (rect.bottom() * pixels_per_point).round() as i32;
+
+        let x0 = x0.clamp(0, width);
+        let y0 = y0.clamp(0, height);
+        let x1 = x1.clamp(0, width);
+        let y1 = y1.clamp(0, height);
+
+        let crop_w = (x1 - x0).max(0) as usize;
+        let crop_h = (y1 - y0).max(0) as usize;
+        if crop_w == 0 || crop_h == 0
+        {
+            return None;
+        }
+
+        let mut pixels = Vec::with_capacity(crop_w * crop_h);
+        for y in 0..crop_h
+        {
+            let src_y = y0 as usize + y;
+            let start = src_y * image.width() + x0 as usize;
+            let end = start + crop_w;
+            pixels.extend_from_slice(&image.pixels[start..end]);
+        }
+
+        Some(egui::ColorImage {
+            size: [crop_w, crop_h],
+            pixels,
+        })
+    }
+
+    fn encode_png(&self, image: &egui::ColorImage) -> Result<Vec<u8>>
+    {
+        use image::codecs::png::PngEncoder;
+        use image::ColorType;
+        use image::ImageEncoder;
+
+        let mut rgba = Vec::with_capacity(image.pixels.len() * 4);
+        for color in &image.pixels
+        {
+            rgba.extend_from_slice(&color.to_array());
+        }
+
+        let mut bytes = Vec::new();
+        let encoder = PngEncoder::new(&mut bytes);
+        encoder.write_image(
+            &rgba,
+            image.width() as u32,
+            image.height() as u32,
+            ColorType::Rgba8.into(),
+        )?;
+        Ok(bytes)
+    }
+
+    fn handle_screenshot_events(&mut self, ctx: &egui::Context)
+    {
+        use base64::Engine;
+
+        let screenshot = {
+            let mut captured: Option<std::sync::Arc<egui::ColorImage>> = None;
+            ctx.input_mut(|i| {
+                i.raw.events.retain(|event| {
+                    if let egui::Event::Screenshot { image, .. } = event
+                    {
+                        captured = Some(image.clone());
+                        false
+                    }
+                    else
+                    {
+                        true
+                    }
+                });
+            });
+            captured
+        };
+
+        let (screenshot, request) = match (screenshot, self.export_request.take())
+        {
+            (Some(image), Some(request)) => (image, request),
+            (Some(_), None) => return,
+            _ => return,
+        };
+
+        let cropped = match self.crop_color_image(&screenshot, request.rect, request.pixels_per_point)
+        {
+            Some(image) => image,
+            None =>
+            {
+                self.status_message = "Export failed: empty viewport region".to_string();
+                return;
+            }
+        };
+
+        let png_bytes = match self.encode_png(&cropped)
+        {
+            Ok(bytes) => bytes,
+            Err(e) =>
+            {
+                self.status_message = format!("Export failed: {}", e);
+                return;
+            }
+        };
+
+        match request.format
+        {
+            ExportFormat::Png =>
+            {
+                let filename = self.export_filename("png");
+                self.save_bytes(ctx, &filename, "image/png", png_bytes);
+            }
+            ExportFormat::Svg =>
+            {
+                let filename = self.export_filename("svg");
+                let encoded = base64::engine::general_purpose::STANDARD.encode(png_bytes);
+                let svg = format!(
+                    r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">
+<image href="data:image/png;base64,{data}" width="{w}" height="{h}" />
+</svg>"#,
+                    w = cropped.width(),
+                    h = cropped.height(),
+                    data = encoded
+                );
+                self.save_bytes(ctx, &filename, "image/svg+xml", svg.into_bytes());
+            }
+        }
+    }
+
+    fn save_bytes(&mut self, ctx: &egui::Context, filename: &str, _mime: &str, data: Vec<u8>)
+    {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Some(path) = rfd::FileDialog::new()
+                .set_file_name(filename)
+                .save_file()
+            {
+                match std::fs::write(&path, data)
+                {
+                    Ok(()) =>
+                    {
+                        self.status_message = format!(
+                            "Exported viewport to {}",
+                            path.file_name().and_then(|n| n.to_str()).unwrap_or("file")
+                        );
+                    }
+                    Err(e) =>
+                    {
+                        self.status_message = format!("Export failed: {}", e);
+                    }
+                }
+            }
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            use wasm_bindgen::JsCast;
+            use web_sys::HtmlAnchorElement;
+
+            if let Some(window) = web_sys::window()
+            {
+                if let Some(document) = window.document()
+                {
+                    let blob_parts = js_sys::Array::new();
+                    let array = js_sys::Uint8Array::from(data.as_slice());
+                    blob_parts.push(&array);
+
+                    let mut blob_property_bag = web_sys::BlobPropertyBag::new();
+                    blob_property_bag.type_(_mime);
+
+                    if let Ok(blob) =
+                        web_sys::Blob::new_with_u8_array_sequence_and_options(
+                            &blob_parts,
+                            &blob_property_bag,
+                        )
+                    {
+                        if let Ok(url) = web_sys::Url::create_object_url_with_blob(&blob)
+                        {
+                            if let Ok(element) = document.create_element("a")
+                            {
+                                if let Ok(anchor) = element.dyn_into::<HtmlAnchorElement>()
+                                {
+                                    let _ = anchor.set_attribute("href", &url);
+                                    let _ = anchor.set_attribute("download", filename);
+                                    anchor.click();
+                                    let _ = web_sys::Url::revoke_object_url(&url);
+                                    self.status_message =
+                                        format!("Downloaded viewport ({})", filename);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let _ = ctx;
     }
 
     fn clear_ruler_selection(&mut self)
@@ -2037,6 +2297,8 @@ impl eframe::App for GenomeViewer
 {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame)
     {
+        self.handle_screenshot_events(ctx);
+
         // Check for async file loading completion (WASM only)
         #[cfg(target_arch = "wasm32")]
         {
@@ -2172,6 +2434,16 @@ impl eframe::App for GenomeViewer
                 if ui.button("📂 Load").clicked()
                 {
                     self.load_session();
+                }
+                ui.separator();
+                ui.label("Export:");
+                if ui.button("PNG").clicked()
+                {
+                    self.request_export(ctx, ExportFormat::Png);
+                }
+                if ui.button("SVG").clicked()
+                {
+                    self.request_export(ctx, ExportFormat::Svg);
                 }
             });
         });
@@ -3042,6 +3314,7 @@ impl eframe::App for GenomeViewer
             let available_size = ui.available_size();
             let (response, painter) =
                 ui.allocate_painter(available_size, egui::Sense::click_and_drag());
+            self.last_viewport_rect = Some(response.rect);
 
             let ruler_rect = if self.genome.is_some() && self.selected_chromosome.is_some()
             {
