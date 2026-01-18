@@ -314,6 +314,24 @@ fn format_fasta(header: &str, sequence: &[u8]) -> String
 
 impl GenomeViewer
 {
+    fn track_type_from_name(name: &str) -> Option<TrackType>
+    {
+        match name
+        {
+            "Ruler" => Some(TrackType::Ruler),
+            "GcContent" => Some(TrackType::GcContent),
+            "Sequence" => Some(TrackType::Sequence),
+            "AminoAcids" => Some(TrackType::AminoAcids),
+            "Features" => Some(TrackType::Features),
+            "Coverage" => Some(TrackType::Coverage),
+            "Alignments" => Some(TrackType::Alignments),
+            "Variants" => Some(TrackType::Variants),
+            "Methylation" => Some(TrackType::Methylation),
+            "CustomTsv" => Some(TrackType::CustomTsv),
+            _ => None,
+        }
+    }
+
     fn new() -> Self
     {
         Self {
@@ -853,7 +871,7 @@ impl GenomeViewer
                                 if sequence[i..i + pattern.len()] == *pattern
                                 {
                                     self.search_results.push((
-                                        chr.clone(),
+                                        chr.to_string(),
                                         format!("Sequence: {}", sequence_query),
                                         i,
                                         i + pattern.len(),
@@ -1670,6 +1688,7 @@ impl GenomeViewer
             fasta_path: self.fasta_path.clone(),
             gff_path: self.gff_path.clone(),
             bam_path: self.bam_path.clone(),
+            tsv_path: self.tsv_path.clone(),
             selected_chromosome: self.selected_chromosome.clone(),
             viewport_start: self.viewport.start,
             viewport_end: self.viewport.end,
@@ -1695,8 +1714,21 @@ impl GenomeViewer
                 .get(&TrackType::Variants)
                 .map(|c| c.visible)
                 .unwrap_or(false),
+            track_order: self.track_order.iter().map(|t| format!("{:?}", t)).collect(),
+            track_configs: self
+                .track_configs
+                .iter()
+                .map(|(track_type, config)| session::SessionTrackConfig {
+                    track_type: format!("{:?}", track_type),
+                    height: config.height,
+                    visible: config.visible,
+                    order: config.order,
+                })
+                .collect(),
             chromosome_sort,
             max_reads_display: self.max_reads_display,
+            tsv_label_font_size: self.tsv_label_font_size,
+            tsv_label_font_monospace: self.tsv_label_font_monospace,
         }
     }
 
@@ -1707,6 +1739,7 @@ impl GenomeViewer
         self.fasta_path = session.fasta_path.clone();
         self.gff_path = session.gff_path.clone();
         self.bam_path = session.bam_path.clone();
+        self.tsv_path = session.tsv_path.clone();
 
         // Restore UI state
         self.show_chromosome_panel = session.show_chromosome_panel;
@@ -1738,6 +1771,50 @@ impl GenomeViewer
 
         // Restore max reads display
         self.max_reads_display = session.max_reads_display;
+        self.tsv_label_font_size = session.tsv_label_font_size;
+        self.tsv_label_font_monospace = session.tsv_label_font_monospace;
+
+        if !session.track_configs.is_empty()
+        {
+            let mut configs = Self::default_track_configs();
+            for config in &session.track_configs
+            {
+                if let Some(track_type) = Self::track_type_from_name(&config.track_type)
+                {
+                    if let Some(existing) = configs.get_mut(&track_type)
+                    {
+                        existing.height = config.height;
+                        existing.visible = config.visible;
+                        existing.order = config.order;
+                    }
+                }
+            }
+            self.track_configs = configs;
+        }
+
+        if !session.track_order.is_empty()
+        {
+            let mut order = Vec::new();
+            for name in &session.track_order
+            {
+                if let Some(track_type) = Self::track_type_from_name(name)
+                {
+                    if !order.contains(&track_type)
+                    {
+                        order.push(track_type);
+                    }
+                }
+            }
+            for track in Self::default_track_order()
+            {
+                if !order.contains(&track)
+                {
+                    order.push(track);
+                }
+            }
+            self.track_order = order;
+            self.sync_track_order();
+        }
 
         // For WASM, save viewport to restore after async load completes
         #[cfg(target_arch = "wasm32")]
@@ -1763,6 +1840,10 @@ impl GenomeViewer
         if !self.bam_path.is_empty()
         {
             self.load_bam();
+        }
+        if !self.tsv_path.is_empty()
+        {
+            self.load_tsv();
         }
 
         // Now restore viewport and chromosome (after all files loaded)

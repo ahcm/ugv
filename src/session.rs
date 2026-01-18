@@ -1,6 +1,20 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+fn default_tsv_label_font_size() -> f32
+{
+    11.0
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionTrackConfig
+{
+    pub track_type: String,
+    pub height: f32,
+    pub visible: bool,
+    pub order: usize,
+}
+
 /// Session data to persist viewer state
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session
@@ -8,6 +22,8 @@ pub struct Session
     pub fasta_path: String,
     pub gff_path: String,
     pub bam_path: String,
+    #[serde(default)]
+    pub tsv_path: String,
     pub selected_chromosome: Option<String>,
     pub viewport_start: usize,
     pub viewport_end: usize,
@@ -16,9 +32,17 @@ pub struct Session
     pub show_coverage: bool,
     pub show_alignments: bool,
     pub show_variants: bool,
+    #[serde(default)]
+    pub track_order: Vec<String>,
+    #[serde(default)]
+    pub track_configs: Vec<SessionTrackConfig>,
     pub chromosome_sort: String, // "Natural", "Alphabetical", or "Size"
     #[serde(default = "default_max_reads_display")]
     pub max_reads_display: usize,
+    #[serde(default = "default_tsv_label_font_size")]
+    pub tsv_label_font_size: f32,
+    #[serde(default)]
+    pub tsv_label_font_monospace: bool,
 }
 
 fn default_max_reads_display() -> usize
@@ -35,6 +59,7 @@ impl Session
             fasta_path: String::new(),
             gff_path: String::new(),
             bam_path: String::new(),
+            tsv_path: String::new(),
             selected_chromosome: None,
             viewport_start: 0,
             viewport_end: 1000000,
@@ -43,8 +68,12 @@ impl Session
             show_coverage: true,
             show_alignments: true,
             show_variants: false,
+            track_order: Vec::new(),
+            track_configs: Vec::new(),
             chromosome_sort: "Natural".to_string(),
             max_reads_display: 1000,
+            tsv_label_font_size: default_tsv_label_font_size(),
+            tsv_label_font_monospace: false,
         }
     }
 
