@@ -2253,11 +2253,33 @@ impl eframe::App for GenomeViewer
             ui.horizontal(|ui| {
                 ui.checkbox(&mut self.show_chromosome_panel, "Show chromosome list");
                 ui.label("Go to:");
-                let go_to_response = ui.add(
-                    egui::TextEdit::singleline(&mut self.position_search)
-                        .hint_text("chr1:100000, chr1:50000-60000, or 100000")
-                        .desired_width(150.0),
-                );
+                let viewport_range = if let Some(ref chr) = self.selected_chromosome
+                {
+                    format!("{}:{}-{}", chr, self.viewport.start, self.viewport.end)
+                }
+                else
+                {
+                    format!("{}-{}", self.viewport.start, self.viewport.end)
+                };
+                if !ui.memory(|mem| mem.has_focus(egui::Id::new("go_to_input")))
+                {
+                    self.position_search = viewport_range;
+                }
+                let go_to_response = ui
+                    .add(
+                        egui::TextEdit::singleline(&mut self.position_search)
+                            .id(egui::Id::new("go_to_input"))
+                            .hint_text("chr1:100000, chr1:50000-60000, or 100000")
+                            .desired_width(150.0),
+                    );
+                if ui.button("−").clicked()
+                {
+                    self.viewport.zoom(2.0, 0.5);
+                }
+                if ui.button("+").clicked()
+                {
+                    self.viewport.zoom(0.5, 0.5);
+                }
                 let mut history_selection: Option<String> = None;
                 let mut clear_history = false;
                 if !self.position_history.is_empty()
