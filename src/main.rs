@@ -14,6 +14,7 @@ use anyhow::Result;
 use eframe::egui;
 
 const TRACK_SPACING: f32 = 10.0;
+const POSITION_HISTORY_LIMIT: usize = 10;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> Result<()>
@@ -194,6 +195,7 @@ struct GenomeViewer
     chromosome_search: String,
     chromosome_sort: ChromosomeSort,
     position_search: String,
+    position_history: Vec<String>,
     feature_search: String,
     search_results: Vec<(String, String, usize, usize)>, // (chr, name, start, end)
     show_search_results: bool,
@@ -322,6 +324,7 @@ impl GenomeViewer
             chromosome_search: String::new(),
             chromosome_sort: ChromosomeSort::Natural,
             position_search: String::new(),
+            position_history: Vec::new(),
             feature_search: String::new(),
             search_results: Vec::new(),
             show_search_results: false,
@@ -676,6 +679,25 @@ impl GenomeViewer
         None
     }
 
+    fn remember_position_search(&mut self, query: &str)
+    {
+        let query = query.trim();
+        if query.is_empty()
+        {
+            return;
+        }
+
+        if let Some(index) = self.position_history.iter().position(|entry| entry == query)
+        {
+            self.position_history.remove(index);
+        }
+        self.position_history.insert(0, query.to_string());
+        if self.position_history.len() > POSITION_HISTORY_LIMIT
+        {
+            self.position_history.truncate(POSITION_HISTORY_LIMIT);
+        }
+    }
+
     fn parse_position_range(
         chr: &str,
         pos: &str,
@@ -741,6 +763,7 @@ impl GenomeViewer
                     self.viewport.set_region(start, end);
 
                     self.status_message = status;
+                    self.remember_position_search(&self.position_search);
                 }
                 else
                 {
@@ -2237,6 +2260,35 @@ impl eframe::App for GenomeViewer
                         .hint_text("chr1:100000, chr1:50000-60000, or 100000")
                         .desired_width(150.0),
                 );
+                let mut history_selection: Option<String> = None;
+                let mut clear_history = false;
+                if !self.position_history.is_empty()
+                {
+                    ui.menu_button("History", |ui| {
+                        for entry in &self.position_history
+                        {
+                            if ui.button(entry).clicked()
+                            {
+                                history_selection = Some(entry.clone());
+                                ui.close_menu();
+                            }
+                        }
+                        ui.separator();
+                        if ui.button("Clear").clicked()
+                        {
+                            clear_history = true;
+                            ui.close_menu();
+                        }
+                    });
+                }
+                if clear_history
+                {
+                    self.position_history.clear();
+                }
+                if let Some(selection) = history_selection
+                {
+                    self.position_search = selection;
+                }
                 let go_to_enter =
                     go_to_response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 if ui.button("🔍 Jump").clicked() || go_to_enter
