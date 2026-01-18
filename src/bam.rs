@@ -255,9 +255,18 @@ impl AlignmentTrack
         }
 
         let (region_start, region_end) = self.loaded_region.unwrap();
+        if region_end <= region_start
+        {
+            return;
+        }
         let region_length = region_end - region_start;
         let num_bins = (region_length + bin_size - 1) / bin_size;
         let mut coverage = vec![CoveragePoint::default(); num_bins];
+
+        for (bin_idx, point) in coverage.iter_mut().enumerate()
+        {
+            point.position = region_start + bin_idx * bin_size;
+        }
 
         for record in &self.records
         {
@@ -281,8 +290,6 @@ impl AlignmentTrack
                         _ =>
                         {}
                     }
-
-                    coverage[bin_idx].position = region_start + bin_idx * bin_size;
                 }
             }
         }
@@ -362,6 +369,22 @@ pub struct AlignmentData
 
 impl AlignmentData
 {
+    fn extract_reference_lengths(header: &sam::Header) -> HashMap<String, usize>
+    {
+        header
+            .reference_sequences()
+            .iter()
+            .map(|(name, reference_sequence)| {
+                (name.to_string(), usize::from(reference_sequence.length()))
+            })
+            .collect()
+    }
+
+    fn reference_length(&self, chromosome: &str) -> usize
+    {
+        *self.reference_lengths.get(chromosome).unwrap_or(&0)
+    }
+
     /// Create from file path (native only) - does NOT load records yet
     #[cfg(not(target_arch = "wasm32"))]
     pub fn from_file(bam_path: &str) -> Result<Self>
@@ -370,15 +393,7 @@ impl AlignmentData
 
         let mut reader = bam::io::Reader::new(File::open(bam_path)?);
         let header = reader.read_header()?;
-
-        // Extract reference lengths from header
-        let mut reference_lengths = HashMap::new();
-        for (name, reference_sequence) in header.reference_sequences().iter()
-        {
-            let name_str = name.to_string();
-            let length: usize = reference_sequence.length().into();
-            reference_lengths.insert(name_str, length);
-        }
+        let reference_lengths = Self::extract_reference_lengths(&header);
 
         Ok(AlignmentData {
             bam_path: bam_path.to_string(),
@@ -395,15 +410,7 @@ impl AlignmentData
         let cursor = Cursor::new(&data);
         let mut reader = bam::io::Reader::new(cursor);
         let header = reader.read_header()?;
-
-        // Extract reference lengths from header
-        let mut reference_lengths = HashMap::new();
-        for (name, reference_sequence) in header.reference_sequences().iter()
-        {
-            let name_str = name.to_string();
-            let length: usize = reference_sequence.length().into();
-            reference_lengths.insert(name_str, length);
-        }
+        let reference_lengths = Self::extract_reference_lengths(&header);
 
         Ok(AlignmentData {
             bam_bytes: data,
@@ -424,12 +431,15 @@ impl AlignmentData
     {
         // Calculate region with buffer
         let buffer_start = viewport_start.saturating_sub(VIEWPORT_BUFFER);
-        let buffer_end = (viewport_end + VIEWPORT_BUFFER).min(
-            *self
-                .reference_lengths
-                .get(chromosome)
-                .unwrap_or(&usize::MAX),
-        );
+        let reference_length = self.reference_length(chromosome);
+        let buffer_end = if reference_length == 0
+        {
+            viewport_end.saturating_add(VIEWPORT_BUFFER)
+        }
+        else
+        {
+            (viewport_end + VIEWPORT_BUFFER).min(reference_length)
+        };
 
         // Limit region size
         let region_size = buffer_end - buffer_start;
@@ -516,7 +526,7 @@ impl AlignmentData
                     }
 
                     let record = result?;
-                    if let Some(alignment) = Self::parse_record(&record, &header)?
+                    if let Some(alignment) = Self::parse_record(&record)?
                     {
                         track.records.push(alignment);
                         count += 1;
@@ -558,7 +568,7 @@ impl AlignmentData
                                 let pos_0based = usize::from(pos) - 1;
                                 if pos_0based >= start && pos_0based <= end
                                 {
-                                    if let Some(alignment) = Self::parse_record(&record, &header)?
+                                    if let Some(alignment) = Self::parse_record(&record)?
                                     {
                                         track.records.push(alignment);
                                         count += 1;
@@ -619,7 +629,7 @@ impl AlignmentData
         let mut reader = bam::io::Reader::new(cursor);
         let header = reader.read_header()?;
 
-        let reference_length = *self.reference_lengths.get(chromosome).unwrap_or(&0);
+        let reference_length = self.reference_length(chromosome);
         let mut track = AlignmentTrack::new(chromosome.to_string(), reference_length);
         track.loaded_region = Some((0, reference_length));
 
@@ -644,7 +654,7 @@ impl AlignmentData
                 {
                     if ref_name.to_string() == chromosome
                     {
-                        if let Some(alignment) = Self::parse_record(&record, &header)?
+                        if let Some(alignment) = Self::parse_record(&record)?
                         {
                             track.records.push(alignment);
                             count += 1;
@@ -881,7 +891,7 @@ impl AlignmentData
     }
 
     /// Parse a single BAM record into AlignmentRecord
-    fn parse_record(record: &bam::Record, header: &sam::Header) -> Result<Option<AlignmentRecord>>
+    fn parse_record(record: &bam::Record) -> Result<Option<AlignmentRecord>>
     {
         // Skip unmapped reads
         let flags = record.flags();
@@ -889,13 +899,6 @@ impl AlignmentData
         {
             return Ok(None);
         }
-
-        // Get reference sequence ID
-        let ref_seq_id = match record.reference_sequence_id()
-        {
-            Some(Ok(id)) => id,
-            _ => return Ok(None),
-        };
 
         // Get alignment start (convert from 1-based to 0-based)
         let reference_start = match record.alignment_start()
@@ -931,9 +934,7 @@ impl AlignmentData
         let reference_end = reference_start + ref_length;
 
         // Extract sequence
-        let sequence: Vec<u8> = (0..record.sequence().len())
-            .filter_map(|i| record.sequence().get(i))
-            .collect();
+        let sequence = record.sequence().as_ref().to_vec();
 
         // Extract quality scores
         let quality_scores: Vec<u8> = record.quality_scores().as_ref().to_vec();
@@ -1073,6 +1074,7 @@ mod tests
                 strand: Strand::Forward,
                 cigar: vec![],
                 variants: vec![],
+                methylation: vec![],
             },
             AlignmentRecord {
                 name: "read2".to_string(),
@@ -1085,6 +1087,7 @@ mod tests
                 strand: Strand::Forward,
                 cigar: vec![],
                 variants: vec![],
+                methylation: vec![],
             },
             AlignmentRecord {
                 name: "read3".to_string(),
@@ -1097,6 +1100,7 @@ mod tests
                 strand: Strand::Forward,
                 cigar: vec![],
                 variants: vec![],
+                methylation: vec![],
             },
         ];
 
