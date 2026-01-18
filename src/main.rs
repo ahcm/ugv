@@ -763,7 +763,8 @@ impl GenomeViewer
                     self.viewport.set_region(start, end);
 
                     self.status_message = status;
-                    self.remember_position_search(&self.position_search);
+                    let query = self.position_search.clone();
+                    self.remember_position_search(&query);
                 }
                 else
                 {
