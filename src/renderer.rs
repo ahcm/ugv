@@ -174,11 +174,19 @@ pub fn draw_gc_content(
         Stroke::new(1.0, Color32::from_gray(200)),
     );
 
-    // Calculate GC content in windows
-    let window_size = (viewport.width() / rect.width() as usize).max(100);
+    // Calculate GC content in windows (aligned to fixed 100bp grid)
+    let base_window = 100;
+    let mut window_size = (viewport.width() / rect.width() as usize).max(base_window);
+    window_size = ((window_size + base_window - 1) / base_window) * base_window;
     let mut points = Vec::new();
 
-    for i in (viewport.start..viewport.end).step_by(window_size.max(1))
+    let mut start = (viewport.start / base_window) * base_window;
+    if start >= base_window
+    {
+        start -= base_window;
+    }
+
+    for i in (start..viewport.end).step_by(window_size.max(1))
     {
         let gc = chromosome.get_gc_content(i, (i + window_size).min(viewport.end));
         let x = viewport.position_to_screen(i, rect.width()) + rect.left();
