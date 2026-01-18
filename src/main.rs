@@ -2621,6 +2621,7 @@ impl eframe::App for GenomeViewer
 
                                 let row_response = ui.group(|ui| {
                                     ui.horizontal(|ui| {
+                                        ui.label(egui::RichText::new("::").monospace());
                                         ui.label(egui::RichText::new(&track_name).strong());
 
                                         // Reorder buttons
@@ -2744,6 +2745,21 @@ impl eframe::App for GenomeViewer
                                 }
 
                                 row_rects.push((track_type, row_response.response.rect));
+                                if self.dragging_track == Some(track_type)
+                                {
+                                    let rect = row_response.response.rect;
+                                    let painter = ui.painter();
+                                    painter.rect_filled(
+                                        rect,
+                                        4.0,
+                                        egui::Color32::from_rgb(235, 245, 255),
+                                    );
+                                    painter.rect_stroke(
+                                        rect,
+                                        4.0,
+                                        egui::Stroke::new(1.0, egui::Color32::from_rgb(90, 140, 200)),
+                                    );
+                                }
                                 ui.add_space(5.0);
                             }
                         }
@@ -2753,12 +2769,21 @@ impl eframe::App for GenomeViewer
                             if let (Some(dragging), Some(pos)) =
                                 (self.dragging_track, pointer_pos)
                             {
-                                if let Some((target, _)) = row_rects
+                                if let Some((target, rect)) = row_rects
                                     .iter()
                                     .find(|(_, rect)| rect.contains(pos))
                                 {
                                     if *target != dragging
                                     {
+                                        let painter = ui.painter();
+                                        painter.rect_stroke(
+                                            *rect,
+                                            4.0,
+                                            egui::Stroke::new(
+                                                1.0,
+                                                egui::Color32::from_rgb(120, 170, 220),
+                                            ),
+                                        );
                                         if let (Some(from), Some(to)) = (
                                             ordered_tracks.iter().position(|t| *t == dragging),
                                             ordered_tracks.iter().position(|t| *t == *target),
