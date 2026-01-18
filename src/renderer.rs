@@ -5,7 +5,7 @@ use crate::interval_tree::IntervalTree;
 use crate::translation;
 use crate::tsv::TsvChromosomeTrack;
 use crate::viewport::Viewport;
-use egui::{Color32, FontFamily, FontId, Painter, Pos2, Rect, Stroke, Vec2};
+use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Stroke, Vec2};
 
 const RULER_HEIGHT: f32 = 30.0;
 const SEQUENCE_HEIGHT: f32 = 40.0;
@@ -23,9 +23,46 @@ const VARIANT_TRACK_HEIGHT: f32 = 30.0;
 // TSV track constants
 const TSV_TRACK_HEIGHT: f32 = 100.0;
 
+pub trait TrackPainter
+{
+    fn rect_filled(&self, rect: Rect, rounding: f32, color: Color32);
+    fn rect_stroke(&self, rect: Rect, rounding: f32, stroke: Stroke);
+    fn line_segment(&self, points: [Pos2; 2], stroke: Stroke);
+    fn text(&self, pos: Pos2, align: Align2, text: &str, font: FontId, color: Color32);
+    fn circle_filled(&self, center: Pos2, radius: f32, color: Color32);
+}
+
+impl TrackPainter for Painter
+{
+    fn rect_filled(&self, rect: Rect, rounding: f32, color: Color32)
+    {
+        Painter::rect_filled(self, rect, rounding, color);
+    }
+
+    fn rect_stroke(&self, rect: Rect, rounding: f32, stroke: Stroke)
+    {
+        Painter::rect_stroke(self, rect, rounding, stroke);
+    }
+
+    fn line_segment(&self, points: [Pos2; 2], stroke: Stroke)
+    {
+        Painter::line_segment(self, points, stroke);
+    }
+
+    fn text(&self, pos: Pos2, align: Align2, text: &str, font: FontId, color: Color32)
+    {
+        Painter::text(self, pos, align, text, font, color);
+    }
+
+    fn circle_filled(&self, center: Pos2, radius: f32, color: Color32)
+    {
+        Painter::circle_filled(self, center, radius, color);
+    }
+}
+
 // Helper function to draw an empty track placeholder
 pub fn draw_empty_track(
-    painter: &Painter,
+    painter: &impl TrackPainter,
     rect: Rect,
     y_offset: f32,
     height: f32,
@@ -44,7 +81,7 @@ pub fn draw_empty_track(
     // Draw label
     painter.text(
         Pos2::new(rect.left() + 5.0, y_offset + 5.0),
-        egui::Align2::LEFT_TOP,
+        Align2::LEFT_TOP,
         label,
         FontId::proportional(12.0),
         Color32::from_gray(120),
@@ -53,7 +90,7 @@ pub fn draw_empty_track(
     // Draw "No data" message in center
     painter.text(
         Pos2::new(rect.center().x, y_offset + height / 2.0),
-        egui::Align2::CENTER_CENTER,
+        Align2::CENTER_CENTER,
         "No data in viewport",
         FontId::proportional(11.0),
         Color32::from_gray(150),
@@ -64,7 +101,7 @@ pub fn draw_empty_track(
 
 // Make these functions public so they can be called from main.rs
 pub fn draw_ruler(
-    painter: &Painter,
+    painter: &impl TrackPainter,
     rect: Rect,
     viewport: &Viewport,
     y_offset: f32,
@@ -110,7 +147,7 @@ pub fn draw_ruler(
     // Draw chromosome name on the left
     painter.text(
         Pos2::new(rect.left() + 10.0, ruler_rect.top() + height / 2.0),
-        egui::Align2::LEFT_CENTER,
+        Align2::LEFT_CENTER,
         chromosome_name,
         egui::FontId::proportional(14.0),
         Color32::from_rgb(60, 60, 100),
@@ -139,8 +176,8 @@ pub fn draw_ruler(
         let label = format_position(tick, tick_interval);
         painter.text(
             Pos2::new(x, ruler_rect.top() + 15.0),
-            egui::Align2::CENTER_TOP,
-            label,
+            Align2::CENTER_TOP,
+            label.as_str(),
             egui::FontId::monospace(10.0),
             Color32::BLACK,
         );
@@ -150,7 +187,7 @@ pub fn draw_ruler(
 }
 
 pub fn draw_gc_content(
-    painter: &Painter,
+    painter: &impl TrackPainter,
     rect: Rect,
     chromosome: &Chromosome,
     viewport: &Viewport,
@@ -209,7 +246,7 @@ pub fn draw_gc_content(
     // Label
     painter.text(
         Pos2::new(gc_rect.left() + 5.0, gc_rect.top() + 5.0),
-        egui::Align2::LEFT_TOP,
+        Align2::LEFT_TOP,
         "GC%",
         egui::FontId::monospace(10.0),
         Color32::DARK_GRAY,
@@ -219,7 +256,7 @@ pub fn draw_gc_content(
 }
 
 pub fn draw_sequence(
-    painter: &Painter,
+    painter: &impl TrackPainter,
     rect: Rect,
     chromosome: &Chromosome,
     viewport: &Viewport,
@@ -252,10 +289,11 @@ pub fn draw_sequence(
                     _ => Color32::GRAY,
                 };
 
+                let base_text = base.to_string();
                 painter.text(
                     Pos2::new(x, seq_rect.center().y),
-                    egui::Align2::CENTER_CENTER,
-                    base.to_string(),
+                    Align2::CENTER_CENTER,
+                    base_text.as_str(),
                     egui::FontId::monospace(10.0),
                     color,
                 );
@@ -296,7 +334,7 @@ pub fn draw_sequence(
 }
 
 pub fn draw_amino_acid_frames(
-    painter: &Painter,
+    painter: &impl TrackPainter,
     rect: Rect,
     chromosome: &Chromosome,
     viewport: &Viewport,
@@ -370,7 +408,7 @@ pub fn draw_amino_acid_frames(
 }
 
 fn draw_single_frame(
-    painter: &Painter,
+    painter: &impl TrackPainter,
     rect: Rect,
     amino_acids: &[char],
     viewport: &Viewport,
@@ -404,8 +442,8 @@ fn draw_single_frame(
     let frame_label = format!("{}{}", strand_symbol, frame + 1);
     painter.text(
         Pos2::new(rect.left() + 5.0, y_offset + AMINO_ACID_TRACK_HEIGHT / 2.0),
-        egui::Align2::LEFT_CENTER,
-        frame_label,
+        Align2::LEFT_CENTER,
+        frame_label.as_str(),
         FontId::monospace(10.0),
         Color32::from_gray(100),
     );
@@ -454,8 +492,8 @@ fn draw_single_frame(
                 {
                     painter.text(
                         Pos2::new(x + char_width / 2.0, y_offset + AMINO_ACID_TRACK_HEIGHT / 2.0),
-                        egui::Align2::CENTER_CENTER,
-                        aa.to_string(),
+                        Align2::CENTER_CENTER,
+                        aa.to_string().as_str(),
                         FontId::monospace(10.0),
                         color,
                     );
@@ -491,7 +529,7 @@ fn get_amino_acid_color(aa: char) -> Color32
 }
 
 pub fn draw_features(
-    painter: &Painter,
+    painter: &impl TrackPainter,
     rect: Rect,
     features: &[Feature],
     viewport: &Viewport,
@@ -566,7 +604,7 @@ pub fn draw_features(
 }
 
 fn draw_feature(
-    painter: &Painter,
+    painter: &impl TrackPainter,
     rect: Rect,
     feature: &Feature,
     viewport: &Viewport,
@@ -632,10 +670,11 @@ fn draw_feature(
     // Draw label if there's enough space
     if feature_rect.width() > 50.0
     {
+        let name = feature.name();
         painter.text(
             feature_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            feature.name(),
+            Align2::CENTER_CENTER,
+            name.as_str(),
             egui::FontId::monospace(9.0),
             Color32::WHITE,
         );
@@ -715,7 +754,7 @@ fn format_position(pos: usize, tick_interval: usize) -> String
 
 /// Draw coverage histogram track
 pub fn draw_coverage_track(
-    painter: &Painter,
+    painter: &impl TrackPainter,
     rect: Rect,
     track: &AlignmentTrack,
     viewport: &Viewport,
@@ -732,7 +771,7 @@ pub fn draw_coverage_track(
     // Draw label
     painter.text(
         Pos2::new(rect.left() + 5.0, y_offset + 5.0),
-        egui::Align2::LEFT_TOP,
+        Align2::LEFT_TOP,
         "Coverage",
         FontId::proportional(12.0),
         Color32::BLACK,
@@ -746,7 +785,7 @@ pub fn draw_coverage_track(
     {
         painter.text(
             Pos2::new(rect.center().x, y_offset + height / 2.0),
-            egui::Align2::CENTER_CENTER,
+            Align2::CENTER_CENTER,
             "No coverage data",
             FontId::proportional(11.0),
             Color32::from_gray(150),
@@ -762,7 +801,7 @@ pub fn draw_coverage_track(
     {
         painter.text(
             Pos2::new(rect.center().x, y_offset + height / 2.0),
-            egui::Align2::CENTER_CENTER,
+            Align2::CENTER_CENTER,
             "Coverage not loaded for this region",
             FontId::proportional(11.0),
             Color32::from_gray(150),
@@ -781,7 +820,7 @@ pub fn draw_coverage_track(
     {
         painter.text(
             Pos2::new(rect.center().x, y_offset + height / 2.0),
-            egui::Align2::CENTER_CENTER,
+            Align2::CENTER_CENTER,
             "No coverage in this region",
             FontId::proportional(11.0),
             Color32::from_gray(150),
@@ -795,7 +834,7 @@ pub fn draw_coverage_track(
     {
         painter.text(
             Pos2::new(rect.center().x, y_offset + height / 2.0),
-            egui::Align2::CENTER_CENTER,
+            Align2::CENTER_CENTER,
             "No coverage in this region",
             FontId::proportional(11.0),
             Color32::from_gray(150),
@@ -836,8 +875,8 @@ pub fn draw_coverage_track(
     let label_text = format!("Coverage (max: {})", max_depth);
     painter.text(
         Pos2::new(rect.left() + 5.0, y_offset + 5.0),
-        egui::Align2::LEFT_TOP,
-        label_text,
+        Align2::LEFT_TOP,
+        label_text.as_str(),
         FontId::proportional(12.0),
         Color32::BLACK,
     );
@@ -847,7 +886,7 @@ pub fn draw_coverage_track(
 
 /// Draw alignment reads track
 pub fn draw_alignments(
-    painter: &Painter,
+    painter: &impl TrackPainter,
     rect: Rect,
     track: &AlignmentTrack,
     viewport: &Viewport,
@@ -868,8 +907,9 @@ pub fn draw_alignments(
     {
         painter.text(
             Pos2::new(rect.left() + 5.0, y_offset + 5.0),
-            egui::Align2::LEFT_TOP,
-            format!("Too many reads ({}) - zoom in or increase limit to view", visible_reads.len()),
+            Align2::LEFT_TOP,
+            format!("Too many reads ({}) - zoom in or increase limit to view", visible_reads.len())
+                .as_str(),
             FontId::proportional(12.0),
             Color32::DARK_GRAY,
         );
@@ -911,8 +951,8 @@ pub fn draw_alignments(
     // Draw label
     painter.text(
         Pos2::new(rect.left() + 5.0, y_offset + 5.0),
-        egui::Align2::LEFT_TOP,
-        format!("Alignments ({} reads)", visible_reads.len()),
+        Align2::LEFT_TOP,
+        format!("Alignments ({} reads)", visible_reads.len()).as_str(),
         FontId::proportional(12.0),
         Color32::BLACK,
     );
@@ -937,7 +977,7 @@ pub fn draw_alignments(
 
 /// Draw a single alignment read
 fn draw_single_read(
-    painter: &Painter,
+    painter: &impl TrackPainter,
     rect: &Rect,
     read: &AlignmentRecord,
     viewport: &Viewport,
@@ -970,7 +1010,7 @@ fn draw_single_read(
 
 /// Draw variant summary track
 pub fn draw_variant_summary(
-    painter: &Painter,
+    painter: &impl TrackPainter,
     rect: Rect,
     track: &AlignmentTrack,
     viewport: &Viewport,
@@ -1013,8 +1053,8 @@ pub fn draw_variant_summary(
     // Draw label
     painter.text(
         Pos2::new(rect.left() + 5.0, y_offset + 5.0),
-        egui::Align2::LEFT_TOP,
-        format!("Variants ({} positions)", variant_counts.len()),
+        Align2::LEFT_TOP,
+        format!("Variants ({} positions)", variant_counts.len()).as_str(),
         FontId::proportional(12.0),
         Color32::BLACK,
     );
@@ -1077,7 +1117,7 @@ pub fn draw_variant_summary(
 
 /// Draw methylation track showing methylation levels from BAM
 pub fn draw_methylation_track(
-    painter: &Painter,
+    painter: &impl TrackPainter,
     rect: Rect,
     track: &AlignmentTrack,
     viewport: &Viewport,
@@ -1094,7 +1134,7 @@ pub fn draw_methylation_track(
     // Draw label
     painter.text(
         Pos2::new(rect.left() + 5.0, y_offset + 5.0),
-        egui::Align2::LEFT_TOP,
+        Align2::LEFT_TOP,
         "Methylation",
         FontId::proportional(12.0),
         Color32::BLACK,
@@ -1105,7 +1145,7 @@ pub fn draw_methylation_track(
     {
         painter.text(
             Pos2::new(rect.center().x, y_offset + height / 2.0),
-            egui::Align2::CENTER_CENTER,
+            Align2::CENTER_CENTER,
             "No methylation data",
             FontId::proportional(11.0),
             Color32::from_gray(150),
@@ -1122,7 +1162,7 @@ pub fn draw_methylation_track(
     {
         painter.text(
             Pos2::new(rect.center().x, y_offset + height / 2.0),
-            egui::Align2::CENTER_CENTER,
+            Align2::CENTER_CENTER,
             "Methylation not loaded for this region",
             FontId::proportional(11.0),
             Color32::from_gray(150),
@@ -1168,8 +1208,8 @@ pub fn draw_methylation_track(
 
     painter.text(
         Pos2::new(rect.left() + 5.0, y_offset + 5.0),
-        egui::Align2::LEFT_TOP,
-        format!("Methylation ({:.1}% avg)", avg_meth),
+        Align2::LEFT_TOP,
+        format!("Methylation ({:.1}% avg)", avg_meth).as_str(),
         FontId::proportional(12.0),
         Color32::BLACK,
     );
@@ -1234,7 +1274,7 @@ pub fn draw_methylation_track(
 
     painter.text(
         Pos2::new(legend_x - 5.0, legend_y + 4.0),
-        egui::Align2::RIGHT_CENTER,
+        Align2::RIGHT_CENTER,
         "0%",
         FontId::proportional(9.0),
         Color32::DARK_GRAY,
@@ -1242,7 +1282,7 @@ pub fn draw_methylation_track(
 
     painter.text(
         Pos2::new(legend_x + 105.0, legend_y + 4.0),
-        egui::Align2::LEFT_CENTER,
+        Align2::LEFT_CENTER,
         "100%",
         FontId::proportional(9.0),
         Color32::DARK_GRAY,
@@ -1253,7 +1293,7 @@ pub fn draw_methylation_track(
 
 /// Draw TSV custom data track
 pub fn draw_tsv_track(
-    painter: &Painter,
+    painter: &impl TrackPainter,
     rect: Rect,
     track: &TsvChromosomeTrack,
     viewport: &Viewport,
@@ -1275,7 +1315,7 @@ pub fn draw_tsv_track(
     // Draw track label
     painter.text(
         Pos2::new(rect.left() + 5.0, y_offset + 5.0),
-        egui::Align2::LEFT_TOP,
+        Align2::LEFT_TOP,
         "Custom Track",
         FontId::proportional(12.0),
         Color32::from_gray(100),
@@ -1288,7 +1328,7 @@ pub fn draw_tsv_track(
     {
         painter.text(
             Pos2::new(rect.center().x, y_offset + height / 2.0),
-            egui::Align2::CENTER_CENTER,
+            Align2::CENTER_CENTER,
             "No data in this region",
             FontId::proportional(12.0),
             Color32::from_gray(150),
@@ -1343,7 +1383,7 @@ pub fn draw_tsv_track(
 
         painter.text(
             Pos2::new(center_x, label_y),
-            egui::Align2::CENTER_CENTER,
+            Align2::CENTER_CENTER,
             &point.label,
             font.clone(),
             Color32::from_rgb(50, 100, 200),

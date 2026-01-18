@@ -6,6 +6,7 @@ mod icon;
 mod interval_tree;
 mod renderer;
 mod session;
+mod svg_export;
 mod translation;
 mod tsv;
 mod viewport;
@@ -514,6 +515,23 @@ impl GenomeViewer
 
     fn request_export(&mut self, ctx: &egui::Context, format: ExportFormat)
     {
+        if let ExportFormat::Svg = format
+        {
+            match self.export_svg_viewport()
+            {
+                Ok(bytes) =>
+                {
+                    let filename = self.export_filename("svg");
+                    self.save_bytes(ctx, &filename, "image/svg+xml", bytes);
+                }
+                Err(e) =>
+                {
+                    self.status_message = format!("Export failed: {}", e);
+                }
+            }
+            return;
+        }
+
         let rect = match self.last_viewport_rect
         {
             Some(rect) => rect,
@@ -530,6 +548,261 @@ impl GenomeViewer
         });
         ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
         self.status_message = "Capturing viewport...".to_string();
+    }
+
+    fn export_svg_viewport(&mut self) -> Result<Vec<u8>>
+    {
+        let rect = self
+            .last_viewport_rect
+            .ok_or_else(|| anyhow::anyhow!("Viewport not ready for export"))?;
+        let svg_painter = svg_export::SvgPainter::new(rect);
+
+        let selected_chr = self.selected_chromosome.clone();
+        if let (Some(ref mut genome), Some(ref chr_name)) = (self.genome.as_mut(), selected_chr)
+        {
+            if let Some(chr) = genome.get_chromosome(chr_name)
+            {
+                let bam_track = if let Some(ref mut alignments) = self.alignments
+                {
+                    match alignments.query_region(chr_name, self.viewport.start, self.viewport.end)
+                    {
+                        Ok(track) => track,
+                        Err(_) => None,
+                    }
+                }
+                else
+                {
+                    None
+                };
+
+                let tsv_track = self
+                    .tsv_data
+                    .as_ref()
+                    .and_then(|data| data.tracks.get(chr_name));
+
+                let mut y_offset = rect.top();
+                for &track_type in &self.track_order
+                {
+                    let config = self.track_configs.get(&track_type).unwrap();
+                    if !config.visible
+                    {
+                        continue;
+                    }
+
+                    match track_type
+                    {
+                        TrackType::Ruler =>
+                        {
+                            y_offset = renderer::draw_ruler(
+                                &svg_painter,
+                                rect,
+                                &self.viewport,
+                                y_offset,
+                                config.height,
+                                chr_name,
+                                None,
+                            );
+                        }
+                        TrackType::GcContent =>
+                        {
+                            y_offset = renderer::draw_gc_content(
+                                &svg_painter,
+                                rect,
+                                chr,
+                                &self.viewport,
+                                y_offset,
+                                config.height,
+                            );
+                        }
+                        TrackType::Sequence =>
+                        {
+                            y_offset = renderer::draw_sequence(
+                                &svg_painter,
+                                rect,
+                                chr,
+                                &self.viewport,
+                                y_offset,
+                                config.height,
+                            );
+                        }
+                        TrackType::AminoAcids =>
+                        {
+                            y_offset = renderer::draw_amino_acid_frames(
+                                &svg_painter,
+                                rect,
+                                chr,
+                                &self.viewport,
+                                y_offset,
+                                config.height,
+                            );
+                        }
+                        TrackType::Features =>
+                        {
+                            if let Some(interval_tree) = &self.interval_tree
+                            {
+                                y_offset = renderer::draw_features(
+                                    &svg_painter,
+                                    rect,
+                                    &self.features,
+                                    &self.viewport,
+                                    interval_tree,
+                                    chr_name,
+                                    y_offset,
+                                    config.height,
+                                );
+                            }
+                            else
+                            {
+                                y_offset = renderer::draw_empty_track(
+                                    &svg_painter,
+                                    rect,
+                                    y_offset,
+                                    config.height,
+                                    "Features (load GFF/GTF file)",
+                                );
+                            }
+                        }
+                        TrackType::Coverage =>
+                        {
+                            if let Some(track) = bam_track
+                            {
+                                y_offset = renderer::draw_coverage_track(
+                                    &svg_painter,
+                                    rect,
+                                    track,
+                                    &self.viewport,
+                                    y_offset,
+                                    config.height,
+                                );
+                            }
+                            else
+                            {
+                                y_offset = renderer::draw_empty_track(
+                                    &svg_painter,
+                                    rect,
+                                    y_offset,
+                                    config.height,
+                                    "Coverage (load BAM file)",
+                                );
+                            }
+                        }
+                        TrackType::Alignments =>
+                        {
+                            if let Some(track) = bam_track
+                            {
+                                y_offset = renderer::draw_alignments(
+                                    &svg_painter,
+                                    rect,
+                                    track,
+                                    &self.viewport,
+                                    y_offset,
+                                    config.height,
+                                    self.max_reads_display,
+                                );
+                            }
+                            else
+                            {
+                                y_offset = renderer::draw_empty_track(
+                                    &svg_painter,
+                                    rect,
+                                    y_offset,
+                                    config.height,
+                                    "Alignments (load BAM file)",
+                                );
+                            }
+                        }
+                        TrackType::Variants =>
+                        {
+                            if let Some(track) = bam_track
+                            {
+                                y_offset = renderer::draw_variant_summary(
+                                    &svg_painter,
+                                    rect,
+                                    track,
+                                    &self.viewport,
+                                    y_offset,
+                                    config.height,
+                                );
+                            }
+                            else
+                            {
+                                y_offset = renderer::draw_empty_track(
+                                    &svg_painter,
+                                    rect,
+                                    y_offset,
+                                    config.height,
+                                    "Variants (load BAM file)",
+                                );
+                            }
+                        }
+                        TrackType::Methylation =>
+                        {
+                            if let Some(track) = bam_track
+                            {
+                                y_offset = renderer::draw_methylation_track(
+                                    &svg_painter,
+                                    rect,
+                                    track,
+                                    &self.viewport,
+                                    y_offset,
+                                    config.height,
+                                );
+                            }
+                            else
+                            {
+                                y_offset = renderer::draw_empty_track(
+                                    &svg_painter,
+                                    rect,
+                                    y_offset,
+                                    config.height,
+                                    "Methylation (load BAM file)",
+                                );
+                            }
+                        }
+                        TrackType::CustomTsv =>
+                        {
+                            if let Some(track) = tsv_track
+                            {
+                                y_offset = renderer::draw_tsv_track(
+                                    &svg_painter,
+                                    rect,
+                                    track,
+                                    &self.viewport,
+                                    y_offset,
+                                    config.height,
+                                    self.tsv_label_font_size,
+                                    self.tsv_label_font_monospace,
+                                );
+                            }
+                            else
+                            {
+                                y_offset = renderer::draw_empty_track(
+                                    &svg_painter,
+                                    rect,
+                                    y_offset,
+                                    config.height,
+                                    "Custom Track (load TSV file)",
+                                );
+                            }
+                        }
+                    }
+
+                    y_offset += TRACK_SPACING;
+                }
+            }
+        }
+        else
+        {
+            renderer::draw_empty_track(
+                &svg_painter,
+                rect,
+                rect.top(),
+                rect.height(),
+                "No genome loaded",
+            );
+        }
+
+        Ok(svg_painter.finish().into_bytes())
     }
 
     fn crop_color_image(
