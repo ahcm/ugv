@@ -1114,67 +1114,75 @@ impl GenomeViewer
     #[cfg(target_arch = "wasm32")]
     fn check_genome_promise(&mut self)
     {
-        let mut promise_lock = self.genome_promise.lock();
-        if let Some(promise) = promise_lock.as_mut()
-        {
-            if let Some(result) = promise.ready()
-            {
-                self.loading_progress = None;
-                match result
-                {
-                    Ok(genome) =>
-                    {
-                        self.status_message =
-                            format!("Loaded {} chromosomes", genome.chromosomes.len());
+        let ready_result = {
+            let mut promise_lock = self.genome_promise.lock();
+            promise_lock.as_mut().and_then(|promise| {
+                promise.ready().map(|result| {
+                    result
+                        .as_ref()
+                        .map(|genome| genome.clone())
+                        .map_err(|e| anyhow::anyhow!(e.to_string()))
+                })
+            })
+        };
 
-                        // Set to first chromosome (only on initial load)
-                        if self.loading_chromosome.is_none()
+        if let Some(result) = ready_result
+        {
+            self.loading_progress = None;
+            match result
+            {
+                Ok(genome) =>
+                {
+                    self.status_message = format!("Loaded {} chromosomes", genome.chromosomes.len());
+
+                    // Set to first chromosome (only on initial load)
+                    if self.loading_chromosome.is_none()
+                    {
+                        if let Some(first_chr) = genome.chromosomes.keys().next()
                         {
-                            if let Some(first_chr) = genome.chromosomes.keys().next()
+                            self.selected_chromosome = Some(first_chr.clone());
+                            if let Some(chr) = genome.chromosomes.get(first_chr)
                             {
-                                self.selected_chromosome = Some(first_chr.clone());
-                                if let Some(chr) = genome.chromosomes.get(first_chr)
-                                {
-                                    self.viewport = viewport::Viewport::new(0, chr.length);
-                                }
+                                self.viewport = viewport::Viewport::new(0, chr.length);
                             }
                         }
-
-                        // If we're restoring from a session, override with saved viewport
-                        if let Some((saved_chr, saved_start, saved_end)) =
-                            self.session_viewport.take()
-                        {
-                            self.selected_chromosome = saved_chr.clone();
-
-                            let max_length = saved_chr
-                                .as_ref()
-                                .and_then(|chr_name| {
-                                    genome.get_chromosome_info(chr_name).map(|info| info.length)
-                                });
-                            self.apply_saved_viewport(max_length, saved_start, saved_end);
-                        }
-                        self.genome = Some(genome.clone());
-                        self.loading_chromosome = None;
                     }
-                    Err(e) =>
+
+                    // If we're restoring from a session, override with saved viewport
+                    if let Some((saved_chr, saved_start, saved_end)) =
+                        self.session_viewport.take()
                     {
-                        self.status_message = format!("Error loading FASTA: {}", e);
-                        if let Some(chr) = self.loading_chromosome.take()
-                        {
-                            self.failed_chromosomes.insert(chr);
-                        }
+                        self.selected_chromosome = saved_chr.clone();
+
+                        let max_length = saved_chr
+                            .as_ref()
+                            .and_then(|chr_name| {
+                                genome.get_chromosome_info(chr_name).map(|info| info.length)
+                            });
+                        self.apply_saved_viewport(max_length, saved_start, saved_end);
+                    }
+                    self.genome = Some(genome.clone());
+                    self.loading_chromosome = None;
+                }
+                Err(e) =>
+                {
+                    self.status_message = format!("Error loading FASTA: {}", e);
+                    if let Some(chr) = self.loading_chromosome.take()
+                    {
+                        self.failed_chromosomes.insert(chr);
                     }
                 }
-                *promise_lock = None;
             }
-            else
+
+            *self.genome_promise.lock() = None;
+        }
+        else
+        {
+            // Still loading - update progress description
+            if let Some(ref mut progress) = self.loading_progress
             {
-                // Still loading - update progress description
-                if let Some(ref mut progress) = self.loading_progress
-                {
-                    // Update description based on how long we've been loading
-                    progress.description = "Parsing FASTA...".to_string();
-                }
+                // Update description based on how long we've been loading
+                progress.description = "Parsing FASTA...".to_string();
             }
         }
     }

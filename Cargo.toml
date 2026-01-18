@@ -3,10 +3,6 @@ name = "ugv"
 version = "0.1.0"
 edition = "2021"
 
-[features]
-default = ["native"]
-native = ["fastx/url"]
-
 [dependencies]
 eframe = "0.29"
 egui = "0.29"
@@ -30,6 +26,7 @@ noodles = { version = "0.90", features = ["bam", "sam", "core"] }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rfd = "0.15"
 reqwest = { version = "0.12", features = ["blocking", "rustls-tls"], default-features = false }
+fastx = { path = "../fastx", default-features = false, features = ["url"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
