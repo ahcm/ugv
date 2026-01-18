@@ -657,39 +657,59 @@ impl GenomeViewer
         }
     }
 
-    fn parse_position_search(&self, query: &str) -> Option<(String, usize)>
+    fn parse_position_search(&self, query: &str) -> Option<(String, usize, Option<usize>)>
     {
         let query = query.trim();
 
-        // Format: "chr1:100000" or "chr1:100,000" or just "100000"
+        // Format: "chr1:100000", "chr1:50000-60000", or just "100000"/"50000-60000"
         if let Some((chr, pos)) = query.split_once(':')
         {
             // Has chromosome specified
-            let pos_str = pos.replace(&[',', '_'][..], "");
-            if let Ok(position) = pos_str.parse::<usize>()
-            {
-                return Some((chr.to_string(), position));
-            }
+            return Self::parse_position_range(chr, pos);
         }
-        else
+        // Just a number or range, use current chromosome
+        if let Some(ref chr) = self.selected_chromosome
         {
-            // Just a number, use current chromosome
-            let pos_str = query.replace(&[',', '_'][..], "");
-            if let Ok(position) = pos_str.parse::<usize>()
-            {
-                if let Some(ref chr) = self.selected_chromosome
-                {
-                    return Some((chr.clone(), position));
-                }
-            }
+            return Self::parse_position_range(chr, query);
         }
 
         None
     }
 
+    fn parse_position_range(
+        chr: &str,
+        pos: &str,
+    ) -> Option<(String, usize, Option<usize>)>
+    {
+        let pos = pos.trim();
+        let (start_str, end_str) = if let Some((start, end)) = pos.split_once('-')
+        {
+            (start, Some(end))
+        }
+        else
+        {
+            (pos, None)
+        };
+
+        let start_str = start_str.replace(&[',', '_'][..], "");
+        let start = start_str.parse::<usize>().ok()?;
+        let end = if let Some(end_str) = end_str
+        {
+            let end_clean = end_str.replace(&[',', '_'][..], "");
+            Some(end_clean.parse::<usize>().ok()?)
+        }
+        else
+        {
+            None
+        };
+
+        Some((chr.to_string(), start, end))
+    }
+
     fn search_position(&mut self)
     {
-        if let Some((chr, position)) = self.parse_position_search(&self.position_search)
+        if let Some((chr, position, end_position)) =
+            self.parse_position_search(&self.position_search)
         {
             // Check if chromosome exists
             if let Some(ref genome) = self.genome
@@ -698,15 +718,29 @@ impl GenomeViewer
                 {
                     self.selected_chromosome = Some(chr.clone());
 
-                    // Center the view on the position
-                    let window_size = 10000.min(chr_data.length / 2);
-                    let start = position.saturating_sub(window_size / 2);
-                    let end = (position + window_size / 2).min(chr_data.length);
+                    let (start, end, status) = if let Some(mut end_position) = end_position
+                    {
+                        let mut start = position.min(end_position);
+                        end_position = end_position.max(position);
+                        let max_start = chr_data.length.saturating_sub(1);
+                        start = start.min(max_start);
+                        end_position = end_position.min(chr_data.length);
+                        let end = end_position.max(start + 1).min(chr_data.length);
+                        (start, end, format!("Jumped to {}:{}-{}", chr, start, end))
+                    }
+                    else
+                    {
+                        // Center the view on the position
+                        let window_size = 10000.min(chr_data.length / 2);
+                        let start = position.saturating_sub(window_size / 2);
+                        let end = (position + window_size / 2).min(chr_data.length);
+                        (start, end, format!("Jumped to {}:{}", chr, position))
+                    };
 
                     self.viewport = viewport::Viewport::new(0, chr_data.length);
                     self.viewport.set_region(start, end);
 
-                    self.status_message = format!("Jumped to {}:{}", chr, position);
+                    self.status_message = status;
                 }
                 else
                 {
@@ -717,7 +751,7 @@ impl GenomeViewer
         else
         {
             self.status_message =
-                "Invalid position format. Use 'chr1:100000' or '100000'".to_string();
+                "Invalid position format. Use 'chr1:100000', 'chr1:50000-60000', or '100000'".to_string();
         }
     }
 
@@ -2200,7 +2234,7 @@ impl eframe::App for GenomeViewer
                 ui.label("Go to:");
                 let go_to_response = ui.add(
                     egui::TextEdit::singleline(&mut self.position_search)
-                        .hint_text("chr1:100000 or 100000")
+                        .hint_text("chr1:100000, chr1:50000-60000, or 100000")
                         .desired_width(150.0),
                 );
                 let go_to_enter =
