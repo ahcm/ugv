@@ -985,8 +985,8 @@ pub fn draw_variant_summary(
     painter.rect_filled(track_rect, 0.0, Color32::from_gray(250));
 
     // Collect variant counts by position
-    let mut variant_counts: std::collections::HashMap<usize, (u32, u32, u32)> =
-        std::collections::HashMap::new();
+    let mut variant_counts: std::collections::BTreeMap<usize, (u32, u32, u32)> =
+        std::collections::BTreeMap::new();
 
     for record in &track.records
     {
