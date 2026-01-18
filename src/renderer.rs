@@ -5,7 +5,7 @@ use crate::interval_tree::IntervalTree;
 use crate::translation;
 use crate::tsv::TsvChromosomeTrack;
 use crate::viewport::Viewport;
-use egui::{Color32, FontId, Painter, Pos2, Rect, Stroke, Vec2};
+use egui::{Color32, FontFamily, FontId, Painter, Pos2, Rect, Stroke, Vec2};
 
 const RULER_HEIGHT: f32 = 30.0;
 const SEQUENCE_HEIGHT: f32 = 40.0;
@@ -1259,6 +1259,8 @@ pub fn draw_tsv_track(
     viewport: &Viewport,
     y_offset: f32,
     height: f32,
+    font_size: f32,
+    use_monospace: bool,
 ) -> f32
 {
     let track_rect =
@@ -1296,6 +1298,15 @@ pub fn draw_tsv_track(
 
     let label_y = y_offset + height / 2.0;
     let view_span = (viewport.end - viewport.start) as f32;
+    let font_family = if use_monospace
+    {
+        FontFamily::Monospace
+    }
+    else
+    {
+        FontFamily::Proportional
+    };
+    let font = FontId::new(font_size, font_family);
 
     for point in &points
     {
@@ -1309,7 +1320,7 @@ pub fn draw_tsv_track(
             Pos2::new(center_x, label_y),
             egui::Align2::CENTER_CENTER,
             &point.label,
-            FontId::proportional(11.0),
+            font.clone(),
             Color32::from_rgb(50, 100, 200),
         );
     }

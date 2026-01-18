@@ -207,6 +207,8 @@ struct GenomeViewer
     // TSV custom tracks
     tsv_data: Option<tsv::TsvData>,
     tsv_path: String,
+    tsv_label_font_size: f32,
+    tsv_label_font_monospace: bool,
     #[cfg(target_arch = "wasm32")]
     tsv_file_name: String,
     // Track configuration
@@ -336,6 +338,8 @@ impl GenomeViewer
             // TSV custom tracks
             tsv_data: None,
             tsv_path: String::new(),
+            tsv_label_font_size: 11.0,
+            tsv_label_font_monospace: false,
             #[cfg(target_arch = "wasm32")]
             tsv_file_name: String::new(),
             // Track configuration - initialize default tracks
@@ -2676,6 +2680,24 @@ impl eframe::App for GenomeViewer
                                             self.max_reads_display
                                         ));
                                     }
+                                    else if track_type == TrackType::CustomTsv
+                                    {
+                                        ui.separator();
+                                        ui.label("Label font:");
+                                        ui.horizontal(|ui| {
+                                            ui.add(
+                                                egui::Slider::new(
+                                                    &mut self.tsv_label_font_size,
+                                                    8.0..=24.0,
+                                                )
+                                                .text("px"),
+                                            );
+                                            ui.checkbox(
+                                                &mut self.tsv_label_font_monospace,
+                                                "Monospace",
+                                            );
+                                        });
+                                    }
 
                                     // Visibility toggle
                                     let config_mut =
@@ -3171,6 +3193,8 @@ impl eframe::App for GenomeViewer
                                         &self.viewport,
                                         y_offset,
                                         config.height,
+                                        self.tsv_label_font_size,
+                                        self.tsv_label_font_monospace,
                                     );
                                 }
                                 else
