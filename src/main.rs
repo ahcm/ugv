@@ -200,6 +200,7 @@ struct GenomeViewer
     search_results: Vec<(String, String, usize, usize)>, // (chr, name, start, end)
     show_search_results: bool,
     show_chromosome_panel: bool,
+    dragging_track: Option<TrackType>,
     // BAM support
     alignments: Option<bam::AlignmentData>,
     bam_path: String,
@@ -331,6 +332,7 @@ impl GenomeViewer
             search_results: Vec::new(),
             show_search_results: false,
             show_chromosome_panel: true,
+            dragging_track: None,
             // BAM support
             alignments: None,
             bam_path: String::new(),
@@ -2605,16 +2607,19 @@ impl eframe::App for GenomeViewer
                     ui.separator();
 
                     egui::ScrollArea::vertical().show(ui, |ui| {
-                        let ordered_len = self.track_order.len();
+                        let ordered_tracks = self.track_order.clone();
+                        let ordered_len = ordered_tracks.len();
                         let mut reorder_action: Option<(usize, usize)> = None;
+                        let mut row_rects: Vec<(TrackType, egui::Rect)> = Vec::new();
+                        let pointer_pos = ui.input(|i| i.pointer.hover_pos());
 
-                        for (idx, &track_type) in self.track_order.iter().enumerate()
+                        for (idx, &track_type) in ordered_tracks.iter().enumerate()
                         {
                             if self.track_configs.contains_key(&track_type)
                             {
                                 let track_name = format!("{:?}", track_type);
 
-                                ui.group(|ui| {
+                                let row_response = ui.group(|ui| {
                                     ui.horizontal(|ui| {
                                         ui.label(egui::RichText::new(&track_name).strong());
 
@@ -2722,7 +2727,47 @@ impl eframe::App for GenomeViewer
                                     ui.checkbox(&mut config_mut.visible, "Visible");
                                 });
 
+                                let row_id = egui::Id::new(("track_row", track_type));
+                                let drag_response = ui.interact(
+                                    row_response.response.rect,
+                                    row_id,
+                                    egui::Sense::drag(),
+                                );
+
+                                if drag_response.drag_started()
+                                {
+                                    self.dragging_track = Some(track_type);
+                                }
+                                if drag_response.drag_released()
+                                {
+                                    self.dragging_track = None;
+                                }
+
+                                row_rects.push((track_type, row_response.response.rect));
                                 ui.add_space(5.0);
+                            }
+                        }
+
+                        if reorder_action.is_none()
+                        {
+                            if let (Some(dragging), Some(pos)) =
+                                (self.dragging_track, pointer_pos)
+                            {
+                                if let Some((target, _)) = row_rects
+                                    .iter()
+                                    .find(|(_, rect)| rect.contains(pos))
+                                {
+                                    if *target != dragging
+                                    {
+                                        if let (Some(from), Some(to)) = (
+                                            ordered_tracks.iter().position(|t| *t == dragging),
+                                            ordered_tracks.iter().position(|t| *t == *target),
+                                        )
+                                        {
+                                            reorder_action = Some((from, to));
+                                        }
+                                    }
+                                }
                             }
                         }
 
@@ -2730,6 +2775,11 @@ impl eframe::App for GenomeViewer
                         {
                             self.track_order.swap(from, to);
                             self.sync_track_order();
+                        }
+
+                        if ui.input(|i| i.pointer.any_released())
+                        {
+                            self.dragging_track = None;
                         }
 
                         ui.separator();
