@@ -197,6 +197,7 @@ struct GenomeViewer
     position_search: String,
     position_history: Vec<String>,
     feature_search: String,
+    sequence_search: String,
     search_results: Vec<(String, String, usize, usize)>, // (chr, name, start, end)
     show_search_results: bool,
     show_chromosome_panel: bool,
@@ -329,6 +330,7 @@ impl GenomeViewer
             position_search: String::new(),
             position_history: Vec::new(),
             feature_search: String::new(),
+            sequence_search: String::new(),
             search_results: Vec::new(),
             show_search_results: false,
             show_chromosome_panel: true,
@@ -798,42 +800,127 @@ impl GenomeViewer
 
     fn search_features(&mut self)
     {
-        let query = self.feature_search.trim().to_lowercase();
-        if query.is_empty()
+        let feature_query = self.feature_search.trim().to_lowercase();
+        let sequence_query = self.sequence_search.trim().to_uppercase();
+        if feature_query.is_empty() && sequence_query.is_empty()
         {
             return;
         }
 
         self.search_results.clear();
 
-        for feature in &self.features
+        if !feature_query.is_empty()
         {
-            let name = feature.name().to_lowercase();
-            let id = feature.get_attribute("ID").unwrap_or("").to_lowercase();
-            let gene = feature.get_attribute("gene").unwrap_or("").to_lowercase();
-
-            if name.contains(&query) || id.contains(&query) || gene.contains(&query)
+            for feature in &self.features
             {
-                self.search_results.push((
-                    feature.seqid.clone(),
-                    feature.name(),
-                    feature.start,
-                    feature.end,
-                ));
+                let name = feature.name().to_lowercase();
+                let id = feature.get_attribute("ID").unwrap_or("").to_lowercase();
+                let gene = feature.get_attribute("gene").unwrap_or("").to_lowercase();
+
+                if name.contains(&feature_query)
+                    || id.contains(&feature_query)
+                    || gene.contains(&feature_query)
+                {
+                    self.search_results.push((
+                        feature.seqid.clone(),
+                        feature.name(),
+                        feature.start,
+                        feature.end,
+                    ));
+                }
+            }
+        }
+
+        let mut sequence_error: Option<String> = None;
+        if !sequence_query.is_empty()
+        {
+            const MAX_SEQUENCE_MATCHES: usize = 200;
+
+            if let (Some(ref mut genome), Some(ref chr)) =
+                (self.genome.as_mut(), self.selected_chromosome.as_ref())
+            {
+                if genome.ensure_chromosome_loaded(chr).is_ok()
+                {
+                    if let Some(chr_data) = genome.get_chromosome(chr)
+                    {
+                        let pattern = sequence_query.as_bytes();
+                        if !pattern.is_empty() && pattern.len() <= chr_data.sequence.len()
+                        {
+                            let mut count = 0;
+                            let sequence = &chr_data.sequence;
+                            for i in 0..=sequence.len().saturating_sub(pattern.len())
+                            {
+                                if sequence[i..i + pattern.len()] == *pattern
+                                {
+                                    self.search_results.push((
+                                        chr.clone(),
+                                        format!("Sequence: {}", sequence_query),
+                                        i,
+                                        i + pattern.len(),
+                                    ));
+                                    count += 1;
+                                    if count >= MAX_SEQUENCE_MATCHES
+                                    {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    sequence_error = Some(format!(
+                        "Chromosome '{}' not loaded; load it before sequence search",
+                        chr
+                    ));
+                }
+            }
+            else
+            {
+                sequence_error = Some("Select a chromosome for sequence search".to_string());
             }
         }
 
         if self.search_results.is_empty()
         {
-            self.status_message = format!("No features found matching '{}'", self.feature_search);
+            if let Some(error) = sequence_error
+            {
+                self.status_message = error;
+                return;
+            }
+            let mut parts = Vec::new();
+            if !feature_query.is_empty()
+            {
+                parts.push(format!("features '{}'", self.feature_search));
+            }
+            if !sequence_query.is_empty()
+            {
+                parts.push(format!("sequence '{}'", self.sequence_search));
+            }
+            self.status_message = format!("No matches found for {}", parts.join(" and "));
         }
         else
         {
-            self.status_message = format!(
-                "Found {} feature(s) matching '{}'",
+            let mut parts = Vec::new();
+            if !feature_query.is_empty()
+            {
+                parts.push(format!("features '{}'", self.feature_search));
+            }
+            if !sequence_query.is_empty()
+            {
+                parts.push(format!("sequence '{}'", self.sequence_search));
+            }
+            let mut status = format!(
+                "Found {} match(es) for {}",
                 self.search_results.len(),
-                self.feature_search
+                parts.join(" and ")
             );
+            if let Some(error) = sequence_error
+            {
+                status = format!("{}; {}", status, error);
+            }
+            self.status_message = status;
             self.show_search_results = true;
         }
     }
@@ -2342,9 +2429,17 @@ impl eframe::App for GenomeViewer
                         .hint_text("gene name, ID...")
                         .desired_width(150.0),
                 );
+                ui.label("Sequence:");
+                let sequence_response = ui.add(
+                    egui::TextEdit::singleline(&mut self.sequence_search)
+                        .hint_text("ACGT...")
+                        .desired_width(120.0),
+                );
                 let feature_enter =
                     feature_response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                if ui.button("🔍 Search").clicked() || feature_enter
+                let sequence_enter =
+                    sequence_response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                if ui.button("🔍 Search").clicked() || feature_enter || sequence_enter
                 {
                     self.search_features();
                 }
