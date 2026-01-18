@@ -1229,11 +1229,9 @@ impl GenomeViewer
             {
                 let total_points: usize = tsv_data.tracks.values().map(|t| t.points.len()).sum();
                 self.status_message = format!(
-                    "Loaded {} data points from {} chromosomes (range: {:.2} to {:.2})",
+                    "Loaded {} labels from {} chromosomes",
                     total_points,
-                    tsv_data.tracks.len(),
-                    tsv_data.global_min,
-                    tsv_data.global_max
+                    tsv_data.tracks.len()
                 );
                 self.tsv_data = Some(tsv_data);
             }

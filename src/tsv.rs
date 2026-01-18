@@ -7,8 +7,9 @@ use std::io::{BufRead, BufReader};
 pub struct TsvPoint
 {
     pub chromosome: String,
-    pub position: usize,
-    pub signal: f64,
+    pub start: usize,
+    pub end: usize,
+    pub label: String,
 }
 
 /// Track for one chromosome
@@ -16,39 +17,25 @@ pub struct TsvPoint
 pub struct TsvChromosomeTrack
 {
     pub points: Vec<TsvPoint>,
-    pub min_signal: f64,
-    pub max_signal: f64,
 }
 
 impl TsvChromosomeTrack
 {
     pub fn new() -> Self
     {
-        Self {
-            points: Vec::new(),
-            min_signal: f64::INFINITY,
-            max_signal: f64::NEG_INFINITY,
-        }
+        Self { points: Vec::new() }
     }
 
     /// Add a point and update min/max
     pub fn add_point(&mut self, point: TsvPoint)
     {
-        if point.signal < self.min_signal
-        {
-            self.min_signal = point.signal;
-        }
-        if point.signal > self.max_signal
-        {
-            self.max_signal = point.signal;
-        }
         self.points.push(point);
     }
 
     /// Sort points by position
     pub fn sort(&mut self)
     {
-        self.points.sort_by_key(|p| p.position);
+        self.points.sort_by_key(|p| p.start);
     }
 
     /// Get points in a region
@@ -56,7 +43,7 @@ impl TsvChromosomeTrack
     {
         self.points
             .iter()
-            .filter(|p| p.position >= start && p.position <= end)
+            .filter(|p| p.end >= start && p.start <= end)
             .collect()
     }
 }
@@ -67,8 +54,6 @@ pub struct TsvData
 {
     pub tracks: HashMap<String, TsvChromosomeTrack>,
     pub track_name: String,
-    pub global_min: f64,
-    pub global_max: f64,
 }
 
 impl TsvData
@@ -79,8 +64,6 @@ impl TsvData
         Self {
             tracks: HashMap::new(),
             track_name,
-            global_min: f64::INFINITY,
-            global_max: f64::NEG_INFINITY,
         }
     }
 
@@ -127,10 +110,10 @@ impl TsvData
             // Parse tab-separated fields
             let fields: Vec<&str> = line.split('\t').collect();
 
-            if fields.len() < 3
+            if fields.len() < 4
             {
                 eprintln!(
-                    "Warning: Line {} has fewer than 3 fields, skipping: {}",
+                    "Warning: Line {} has fewer than 4 fields, skipping: {}",
                     line_num + 1,
                     line
                 );
@@ -139,13 +122,13 @@ impl TsvData
 
             let chromosome = fields[0].to_string();
 
-            let position = match fields[1].parse::<usize>()
+            let start = match fields[1].parse::<usize>()
             {
                 Ok(pos) => pos,
                 Err(e) =>
                 {
                     eprintln!(
-                        "Warning: Line {} has invalid position '{}': {}",
+                        "Warning: Line {} has invalid start position '{}': {}",
                         line_num + 1,
                         fields[1],
                         e
@@ -154,13 +137,13 @@ impl TsvData
                 }
             };
 
-            let signal = match fields[2].parse::<f64>()
+            let end = match fields[2].parse::<usize>()
             {
-                Ok(sig) => sig,
+                Ok(pos) => pos,
                 Err(e) =>
                 {
                     eprintln!(
-                        "Warning: Line {} has invalid signal '{}': {}",
+                        "Warning: Line {} has invalid end position '{}': {}",
                         line_num + 1,
                         fields[2],
                         e
@@ -169,15 +152,7 @@ impl TsvData
                 }
             };
 
-            // Update global min/max
-            if signal < tsv_data.global_min
-            {
-                tsv_data.global_min = signal;
-            }
-            if signal > tsv_data.global_max
-            {
-                tsv_data.global_max = signal;
-            }
+            let label = fields[3].to_string();
 
             // Add point to appropriate chromosome track
             let track = tsv_data
@@ -187,8 +162,9 @@ impl TsvData
 
             track.add_point(TsvPoint {
                 chromosome,
-                position,
-                signal,
+                start,
+                end,
+                label,
             });
         }
 
@@ -210,7 +186,7 @@ mod tests
     #[test]
     fn test_parse_tsv()
     {
-        let data = b"chr1\t100\t1.5\nchr1\t200\t2.3\nchr2\t150\t0.8\n";
+        let data = b"chr1\t100\t150\tfeature1\nchr1\t200\t250\tfeature2\nchr2\t150\t180\tfeature3\n";
         let tsv = TsvData::from_bytes(data.to_vec(), "test".to_string()).unwrap();
 
         assert_eq!(tsv.tracks.len(), 2);
@@ -219,13 +195,12 @@ mod tests
 
         let chr1_track = &tsv.tracks["chr1"];
         assert_eq!(chr1_track.points.len(), 2);
-        assert_eq!(chr1_track.points[0].position, 100);
-        assert_eq!(chr1_track.points[0].signal, 1.5);
-        assert_eq!(chr1_track.points[1].position, 200);
-        assert_eq!(chr1_track.points[1].signal, 2.3);
-
-        assert_eq!(tsv.global_min, 0.8);
-        assert_eq!(tsv.global_max, 2.3);
+        assert_eq!(chr1_track.points[0].start, 100);
+        assert_eq!(chr1_track.points[0].end, 150);
+        assert_eq!(chr1_track.points[0].label, "feature1");
+        assert_eq!(chr1_track.points[1].start, 200);
+        assert_eq!(chr1_track.points[1].end, 250);
+        assert_eq!(chr1_track.points[1].label, "feature2");
     }
 
     #[test]
@@ -234,22 +209,26 @@ mod tests
         let mut track = TsvChromosomeTrack::new();
         track.add_point(TsvPoint {
             chromosome: "chr1".to_string(),
-            position: 100,
-            signal: 1.0,
+            start: 100,
+            end: 150,
+            label: "feature1".to_string(),
         });
         track.add_point(TsvPoint {
             chromosome: "chr1".to_string(),
-            position: 200,
-            signal: 2.0,
+            start: 200,
+            end: 250,
+            label: "feature2".to_string(),
         });
         track.add_point(TsvPoint {
             chromosome: "chr1".to_string(),
-            position: 300,
-            signal: 3.0,
+            start: 300,
+            end: 320,
+            label: "feature3".to_string(),
         });
 
         let points = track.get_points_in_region(150, 250);
-        assert_eq!(points.len(), 1);
-        assert_eq!(points[0].position, 200);
+        assert_eq!(points.len(), 2);
+        assert_eq!(points[0].start, 100);
+        assert_eq!(points[1].start, 200);
     }
 }
