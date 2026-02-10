@@ -983,7 +983,7 @@ impl GenomeViewer
                     blob_parts.push(&array);
 
                     let mut blob_property_bag = web_sys::BlobPropertyBag::new();
-                    blob_property_bag.type_(_mime);
+                    blob_property_bag.set_type(_mime);
 
                     if let Ok(blob) =
                         web_sys::Blob::new_with_u8_array_sequence_and_options(
@@ -1157,7 +1157,7 @@ impl GenomeViewer
                         blob_parts.push(&wasm_bindgen::JsValue::from_str(&fasta));
 
                         let mut blob_property_bag = web_sys::BlobPropertyBag::new();
-                        blob_property_bag.type_("text/plain");
+                        blob_property_bag.set_type("text/plain");
 
                         if let Ok(blob) = web_sys::Blob::new_with_str_sequence_and_options(
                             &blob_parts,
@@ -1919,7 +1919,7 @@ impl GenomeViewer
         let path = self.tsv_path.clone();
         self.status_message = format!("Loading TSV from {}...", path);
 
-        let promise = poll_promise::Promise::spawn_local(async move {
+        let _promise = poll_promise::Promise::spawn_local(async move {
             let data = file_loader::load_file_async(&path).await?;
             let track_name = path.split('/').last().unwrap_or("Custom Track").to_string();
             tsv::TsvData::from_bytes(data, track_name)
@@ -2489,7 +2489,7 @@ impl GenomeViewer
                         blob_parts.push(&wasm_bindgen::JsValue::from_str(&json));
 
                         let mut blob_property_bag = web_sys::BlobPropertyBag::new();
-                        blob_property_bag.type_("application/json");
+                        blob_property_bag.set_type("application/json");
 
                         if let Ok(blob) = web_sys::Blob::new_with_str_sequence_and_options(
                             &blob_parts,
@@ -2541,7 +2541,7 @@ impl GenomeViewer
 
         spawn_local({
             let status_tx = {
-                let (tx, rx) = std::sync::mpsc::channel();
+                let (tx, _rx) = std::sync::mpsc::channel();
                 tx
             };
 
@@ -3573,7 +3573,7 @@ impl eframe::App for GenomeViewer
                             egui::Id::new("file_drop_overlay"),
                         ));
 
-                        let screen_rect = ctx.screen_rect();
+                        let screen_rect = ctx.viewport_rect();
                         painter.rect_filled(screen_rect, 0.0, egui::Color32::from_black_alpha(192));
 
                         painter.text(

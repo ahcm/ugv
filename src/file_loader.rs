@@ -166,7 +166,7 @@ async fn check_url_exists(url: &str) -> bool
     };
 
     // Try HEAD first (lighter), fall back to GET
-    let mut init = RequestInit::new();
+    let init = RequestInit::new();
     init.set_method("HEAD");
     init.set_mode(RequestMode::Cors);
 
