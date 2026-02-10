@@ -41,7 +41,7 @@ impl TrackPainter for Painter
 
     fn rect_stroke(&self, rect: Rect, rounding: f32, stroke: Stroke)
     {
-        Painter::rect_stroke(self, rect, rounding, stroke);
+        Painter::rect_stroke(self, rect, rounding, stroke, egui::StrokeKind::Middle);
     }
 
     fn line_segment(&self, points: [Pos2; 2], stroke: Stroke)

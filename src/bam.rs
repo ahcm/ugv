@@ -538,7 +538,7 @@ impl AlignmentData
                 let query = reader.query(&header, &region)?;
 
                 let mut count = 0;
-                for result in query
+                for result in query.records()
                 {
                     if count >= MAX_LOADED_ALIGNMENTS
                     {

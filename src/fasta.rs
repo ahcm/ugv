@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use fastx::FastX::{FastXRead, fasta_iter, reader_from_path};
-use fastx::fai::FaiEntry;
 #[cfg(target_arch = "wasm32")]
 use fastx::fai::FaiIndex;
 #[cfg(target_arch = "wasm32")]

@@ -469,7 +469,7 @@ impl GenomeViewer
     {
         let start = start.min(max_length);
         let end = end.min(max_length);
-        let (mut start, mut end) = if end >= start
+        let (start, mut end) = if end >= start
         {
             (start, end)
         }
@@ -546,7 +546,7 @@ impl GenomeViewer
             rect,
             pixels_per_point: ctx.pixels_per_point(),
         });
-        ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
+        ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::UserData::default()));
         self.status_message = "Capturing viewport...".to_string();
     }
 
@@ -844,6 +844,7 @@ impl GenomeViewer
         Some(egui::ColorImage {
             size: [crop_w, crop_h],
             pixels,
+            source_size: egui::Vec2::new(crop_w as f32, crop_h as f32),
         })
     }
 
@@ -1093,7 +1094,7 @@ impl GenomeViewer
         {
             Ok((filename, fasta)) =>
             {
-                ctx.output_mut(|o| o.copied_text = fasta);
+                ctx.copy_text(fasta);
                 self.status_message = format!("Copied selection to clipboard ({})", filename);
             }
             Err(e) =>
@@ -3029,14 +3030,14 @@ impl eframe::App for GenomeViewer
                             if ui.button(entry).clicked()
                             {
                                 history_selection = Some(entry.clone());
-                                ui.close_menu();
+                                ui.close();
                             }
                         }
                         ui.separator();
                         if ui.button("Clear").clicked()
                         {
                             clear_history = true;
-                            ui.close_menu();
+                            ui.close();
                         }
                     });
                 }
@@ -3479,7 +3480,7 @@ impl eframe::App for GenomeViewer
                                 {
                                     self.dragging_track = Some(track_type);
                                 }
-                                if drag_response.drag_released()
+                                if drag_response.drag_stopped()
                                 {
                                     self.dragging_track = None;
                                 }
@@ -3498,6 +3499,7 @@ impl eframe::App for GenomeViewer
                                         rect,
                                         4.0,
                                         egui::Stroke::new(1.0, egui::Color32::from_rgb(90, 140, 200)),
+                                        egui::StrokeKind::Middle,
                                     );
                                 }
                                 ui.add_space(5.0);
@@ -3523,6 +3525,7 @@ impl eframe::App for GenomeViewer
                                                 1.0,
                                                 egui::Color32::from_rgb(120, 170, 220),
                                             ),
+                                            egui::StrokeKind::Middle,
                                         );
                                         if let (Some(from), Some(to)) = (
                                             ordered_tracks.iter().position(|t| *t == dragging),
@@ -3661,7 +3664,7 @@ impl eframe::App for GenomeViewer
                     }
                 }
 
-                if response.drag_released()
+                if response.drag_stopped()
                 {
                     self.ruler_selection_drag = None;
                 }
