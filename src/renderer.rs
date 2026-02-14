@@ -7,21 +7,12 @@ use crate::tsv::TsvChromosomeTrack;
 use crate::viewport::Viewport;
 use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Rect, Stroke, Vec2};
 
-const RULER_HEIGHT: f32 = 30.0;
 const SEQUENCE_HEIGHT: f32 = 40.0;
-const GC_CONTENT_HEIGHT: f32 = 60.0;
-const FEATURE_TRACK_HEIGHT: f32 = 30.0;
 const AMINO_ACID_TRACK_HEIGHT: f32 = 20.0;
 const TRACK_SPACING: f32 = 10.0;
 
 // BAM track constants
-const COVERAGE_TRACK_HEIGHT: f32 = 80.0;
-const ALIGNMENT_ROW_HEIGHT: f32 = 12.0;
 const MAX_ALIGNMENT_ROWS: usize = 50;
-const VARIANT_TRACK_HEIGHT: f32 = 30.0;
-
-// TSV track constants
-const TSV_TRACK_HEIGHT: f32 = 100.0;
 
 pub trait TrackPainter
 {
