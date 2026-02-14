@@ -15,7 +15,7 @@ fi
 # Generate JavaScript bindings
 echo "Generating JavaScript bindings..."
 wasm-bindgen target/wasm32-unknown-unknown/release/ugv.wasm \
-    --out-dir . \
+    --out-dir wasm \
     --target web \
     --no-typescript
 
