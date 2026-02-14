@@ -1,0 +1,7 @@
+[tasks.build-versioned]
+description = "Builds release and renames with version"
+script = [
+    "cargo build --release",
+    "mkdir -p bin",
+    "cp target/release/${CARGO_MAKE_CRATE_NAME} bin/${CARGO_MAKE_CRATE_NAME}-${CARGO_MAKE_CRATE_VERSION}"
+]
