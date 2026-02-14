@@ -1,6 +1,6 @@
 [package]
 name = "ugv"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 
 [dependencies]
@@ -19,7 +19,7 @@ serde_json = "1.0"
 image = { version = "0.25", default-features = false, features = ["png"] }
 base64 = "0.22"
 # fastx with optional URL feature (only enabled on native)
-fastx = { version = "0.6", default-features = false }
+fastx = { version = "0.6.1", default-features = false }
 
 # BAM/SAM file support (pure Rust for WASM compatibility)
 # Using main noodles crate to ensure version compatibility
@@ -28,7 +28,7 @@ noodles = { version = "0.104", features = ["bam", "sam", "core"] }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rfd = "0.17"
 reqwest = { version = "0.13", features = ["blocking", "rustls"], default-features = false }
-fastx = { version = "0.6", features = ["url"] }
+fastx = { version = "0.6.1", features = ["url"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
