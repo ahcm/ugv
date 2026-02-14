@@ -1,3 +1,9 @@
-all:
-	@echo "Using cargo make (please 'cargo install cargo-make' if missing)"
+all: check-env
 	cargo make
+
+check-env:
+	@command -v cargo-make >/dev/null 2>&1 || { \
+		echo "\033[0;31mError: 'cargo-make' is not installed.\033[0m"; \
+		echo "\033[0;32mPlease install it by running\033[0m:\n\033[1m$$ cargo install cargo-make\033[0m"; \
+		exit 1; \
+	}
