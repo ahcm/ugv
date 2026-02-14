@@ -186,7 +186,8 @@ mod tests
     #[test]
     fn test_parse_tsv()
     {
-        let data = b"chr1\t100\t150\tfeature1\nchr1\t200\t250\tfeature2\nchr2\t150\t180\tfeature3\n";
+        let data =
+            b"chr1\t100\t150\tfeature1\nchr1\t200\t250\tfeature2\nchr2\t150\t180\tfeature3\n";
         let tsv = TsvData::from_bytes(data.to_vec(), "test".to_string()).unwrap();
 
         assert_eq!(tsv.tracks.len(), 2);

@@ -850,9 +850,9 @@ impl GenomeViewer
 
     fn encode_png(&self, image: &egui::ColorImage) -> Result<Vec<u8>>
     {
-        use image::codecs::png::PngEncoder;
         use image::ColorType;
         use image::ImageEncoder;
+        use image::codecs::png::PngEncoder;
 
         let mut rgba = Vec::with_capacity(image.pixels.len() * 4);
         for color in &image.pixels
@@ -900,15 +900,16 @@ impl GenomeViewer
             _ => return,
         };
 
-        let cropped = match self.crop_color_image(&screenshot, request.rect, request.pixels_per_point)
-        {
-            Some(image) => image,
-            None =>
+        let cropped =
+            match self.crop_color_image(&screenshot, request.rect, request.pixels_per_point)
             {
-                self.status_message = "Export failed: empty viewport region".to_string();
-                return;
-            }
-        };
+                Some(image) => image,
+                None =>
+                {
+                    self.status_message = "Export failed: empty viewport region".to_string();
+                    return;
+                }
+            };
 
         let png_bytes = match self.encode_png(&cropped)
         {
@@ -948,9 +949,7 @@ impl GenomeViewer
     {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            if let Some(path) = rfd::FileDialog::new()
-                .set_file_name(filename)
-                .save_file()
+            if let Some(path) = rfd::FileDialog::new().set_file_name(filename).save_file()
             {
                 match std::fs::write(&path, data)
                 {
@@ -985,11 +984,10 @@ impl GenomeViewer
                     let mut blob_property_bag = web_sys::BlobPropertyBag::new();
                     blob_property_bag.set_type(_mime);
 
-                    if let Ok(blob) =
-                        web_sys::Blob::new_with_u8_array_sequence_and_options(
-                            &blob_parts,
-                            &blob_property_bag,
-                        )
+                    if let Ok(blob) = web_sys::Blob::new_with_u8_array_sequence_and_options(
+                        &blob_parts,
+                        &blob_property_bag,
+                    )
                     {
                         if let Ok(url) = web_sys::Url::create_object_url_with_blob(&blob)
                         {
@@ -1258,7 +1256,10 @@ impl GenomeViewer
             return;
         }
 
-        if let Some(index) = self.position_history.iter().position(|entry| entry == query)
+        if let Some(index) = self
+            .position_history
+            .iter()
+            .position(|entry| entry == query)
         {
             self.position_history.remove(index);
         }
@@ -1269,10 +1270,7 @@ impl GenomeViewer
         }
     }
 
-    fn parse_position_range(
-        chr: &str,
-        pos: &str,
-    ) -> Option<(String, usize, Option<usize>)>
+    fn parse_position_range(chr: &str, pos: &str) -> Option<(String, usize, Option<usize>)>
     {
         let pos = pos.trim();
         let (start_str, end_str) = if let Some((start, end)) = pos.split_once('-')
@@ -1346,7 +1344,8 @@ impl GenomeViewer
         else
         {
             self.status_message =
-                "Invalid position format. Use 'chr1:100000', 'chr1:50000-60000', or '100000'".to_string();
+                "Invalid position format. Use 'chr1:100000', 'chr1:50000-60000', or '100000'"
+                    .to_string();
         }
     }
 
@@ -1667,7 +1666,8 @@ impl GenomeViewer
             {
                 Ok(genome) =>
                 {
-                    self.status_message = format!("Loaded {} chromosomes", genome.chromosomes.len());
+                    self.status_message =
+                        format!("Loaded {} chromosomes", genome.chromosomes.len());
 
                     // Set to first chromosome (only on initial load)
                     if self.loading_chromosome.is_none()
@@ -1683,16 +1683,13 @@ impl GenomeViewer
                     }
 
                     // If we're restoring from a session, override with saved viewport
-                    if let Some((saved_chr, saved_start, saved_end)) =
-                        self.session_viewport.take()
+                    if let Some((saved_chr, saved_start, saved_end)) = self.session_viewport.take()
                     {
                         self.selected_chromosome = saved_chr.clone();
 
-                        let max_length = saved_chr
-                            .as_ref()
-                            .and_then(|chr_name| {
-                                genome.get_chromosome_info(chr_name).map(|info| info.length)
-                            });
+                        let max_length = saved_chr.as_ref().and_then(|chr_name| {
+                            genome.get_chromosome_info(chr_name).map(|info| info.length)
+                        });
                         self.apply_saved_viewport(max_length, saved_start, saved_end);
                     }
                     self.genome = Some(genome.clone());
@@ -2256,7 +2253,11 @@ impl GenomeViewer
                 .get(&TrackType::Variants)
                 .map(|c| c.visible)
                 .unwrap_or(false),
-            track_order: self.track_order.iter().map(|t| format!("{:?}", t)).collect(),
+            track_order: self
+                .track_order
+                .iter()
+                .map(|t| format!("{:?}", t))
+                .collect(),
             track_configs: self
                 .track_configs
                 .iter()
@@ -2394,22 +2395,12 @@ impl GenomeViewer
         {
             self.selected_chromosome = session.selected_chromosome.clone();
 
-            let max_length = self
-                .genome
-                .as_ref()
-                .and_then(|genome| {
-                    session
-                        .selected_chromosome
-                        .as_ref()
-                        .and_then(|chr_name| {
-                            genome.get_chromosome_info(chr_name).map(|info| info.length)
-                        })
-                });
-            self.apply_saved_viewport(
-                max_length,
-                session.viewport_start,
-                session.viewport_end,
-            );
+            let max_length = self.genome.as_ref().and_then(|genome| {
+                session.selected_chromosome.as_ref().and_then(|chr_name| {
+                    genome.get_chromosome_info(chr_name).map(|info| info.length)
+                })
+            });
+            self.apply_saved_viewport(max_length, session.viewport_start, session.viewport_end);
         }
     }
 
@@ -3005,13 +2996,12 @@ impl eframe::App for GenomeViewer
                 {
                     self.position_search = viewport_range;
                 }
-                let go_to_response = ui
-                    .add(
-                        egui::TextEdit::singleline(&mut self.position_search)
-                            .id(egui::Id::new("go_to_input"))
-                            .hint_text("chr1:100000, chr1:50000-60000, or 100000")
-                            .desired_width(150.0),
-                    );
+                let go_to_response = ui.add(
+                    egui::TextEdit::singleline(&mut self.position_search)
+                        .id(egui::Id::new("go_to_input"))
+                        .hint_text("chr1:100000, chr1:50000-60000, or 100000")
+                        .desired_width(150.0),
+                );
                 if ui.button("−").clicked()
                 {
                     self.viewport.zoom(2.0, 0.5);
@@ -3498,7 +3488,10 @@ impl eframe::App for GenomeViewer
                                     painter.rect_stroke(
                                         rect,
                                         4.0,
-                                        egui::Stroke::new(1.0, egui::Color32::from_rgb(90, 140, 200)),
+                                        egui::Stroke::new(
+                                            1.0,
+                                            egui::Color32::from_rgb(90, 140, 200),
+                                        ),
                                         egui::StrokeKind::Middle,
                                     );
                                 }
@@ -3508,12 +3501,10 @@ impl eframe::App for GenomeViewer
 
                         if reorder_action.is_none()
                         {
-                            if let (Some(dragging), Some(pos)) =
-                                (self.dragging_track, pointer_pos)
+                            if let (Some(dragging), Some(pos)) = (self.dragging_track, pointer_pos)
                             {
-                                if let Some((target, rect)) = row_rects
-                                    .iter()
-                                    .find(|(_, rect)| rect.contains(pos))
+                                if let Some((target, rect)) =
+                                    row_rects.iter().find(|(_, rect)| rect.contains(pos))
                                 {
                                     if *target != dragging
                                     {
