@@ -1,7 +1,36 @@
 [tasks.build-versioned]
 description = "Builds release and renames with version"
 script = [
+    "echo Building for target: ${CARGO_MAKE_BUILD_TARGET:-host}",
     "cargo build --release",
     "mkdir -p bin",
-    "cp target/release/${CARGO_MAKE_CRATE_NAME} bin/${CARGO_MAKE_CRATE_NAME}-${CARGO_MAKE_CRATE_VERSION}"
+    "if [ -z \"${CARGO_MAKE_BUILD_TARGET}\" ]; then cp target/release/${CARGO_MAKE_CRATE_NAME} bin/${CARGO_MAKE_CRATE_NAME}-${CARGO_MAKE_CRATE_VERSION}; else cp target/${CARGO_MAKE_BUILD_TARGET}/release/${CARGO_MAKE_CRATE_NAME} bin/${CARGO_MAKE_CRATE_NAME}-${CARGO_MAKE_CRATE_VERSION}-${CARGO_MAKE_BUILD_TARGET}; fi",
 ]
+
+[tasks.wasm-cargo-build]
+description = "Builds the project for WASM"
+command = "cargo"
+args = ["build", "--release", "--target", "wasm32-unknown-unknown", "--no-default-features"]
+
+[tasks.wasm-bindgen]
+description = "Generates WASM bindings"
+install_crate = { crate_name = "wasm-bindgen-cli", binary = "wasm-bindgen", test_arg = "--version" }
+command = "wasm-bindgen"
+args = [
+    "target/wasm32-unknown-unknown/release/ugv.wasm",
+    "--out-dir", "wasm",
+    "--target", "web",
+    "--no-typescript"
+]
+dependencies = ["wasm-cargo-build"]
+
+[tasks.serve]
+description = "Serves the WASM project locally"
+script = [
+    "echo \"Starting server at http://localhost:8080\"",
+    "python3 -m http.server 8080"
+]
+
+[tasks.build-wasm]
+description = "Builds the WASM project and bindings"
+dependencies = ["wasm-bindgen"]
