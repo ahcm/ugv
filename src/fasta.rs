@@ -1,100 +1,13 @@
 use anyhow::{Context, Result};
 use fastx::FastX::{FastXRead, fasta_iter};
+use fastx::fai::{FaiEntry, FaiIndex};
 #[cfg(target_arch = "wasm32")]
-use fastx::fai::FaiEntry;
+use fastx::gzi::GziIndex;
 
 #[cfg(not(target_arch = "wasm32"))]
 use fastx::FastX::reader_from_path;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
-
-#[cfg(target_arch = "wasm32")]
-#[derive(Clone, Debug)]
-pub struct SimpleFaiIndex
-{
-    pub entries: HashMap<String, FaiEntry>,
-}
-
-#[cfg(target_arch = "wasm32")]
-impl SimpleFaiIndex
-{
-    pub fn from_reader<R: BufRead>(mut reader: R) -> Result<Self>
-    {
-        let mut entries = HashMap::new();
-        let mut line = String::new();
-        while reader.read_line(&mut line)? > 0
-        {
-            let parts: Vec<&str> = line.trim().split('\t').collect();
-            if parts.len() >= 5
-            {
-                let name = parts[0].to_string();
-                let length = parts[1].parse()?;
-                let offset = parts[2].parse()?;
-                let line_bases = parts[3].parse()?;
-                let line_width = parts[4].parse()?;
-
-                // Construct FaiEntry manually since we can't depend on fastx constructors
-                // Assuming fields are public, otherwise we might have issues.
-                // If FaiEntry fields are private, we'll need to define our own FaiEntry too.
-                let entry = FaiEntry {
-                    name: name.clone(),
-                    length,
-                    offset,
-                    line_bases,
-                    line_width,
-                };
-                entries.insert(name, entry);
-            }
-            line.clear();
-        }
-        Ok(Self { entries })
-    }
-
-    pub fn get(&self, name: &str) -> Option<&FaiEntry>
-    {
-        self.entries.get(name)
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-#[derive(Clone, Debug)]
-pub struct SimpleGziIndex
-{
-    entries: Vec<(u64, u64)>,
-}
-
-#[cfg(target_arch = "wasm32")]
-impl SimpleGziIndex
-{
-    pub fn from_bytes(data: &[u8]) -> Result<Self>
-    {
-        use byteorder::{ByteOrder, LittleEndian};
-        if data.len() < 8
-        {
-            return Err(anyhow::anyhow!("Invalid GZI data"));
-        }
-        let count = LittleEndian::read_u64(&data[0..8]);
-        let mut entries = Vec::with_capacity(count as usize);
-        let mut offset = 8;
-        for _ in 0..count
-        {
-            if offset + 16 > data.len()
-            {
-                break;
-            }
-            let compressed = LittleEndian::read_u64(&data[offset..offset + 8]);
-            let uncompressed = LittleEndian::read_u64(&data[offset + 8..offset + 16]);
-            entries.push((compressed, uncompressed));
-            offset += 16;
-        }
-        Ok(Self { entries })
-    }
-
-    pub fn entries(&self) -> &[(u64, u64)]
-    {
-        &self.entries
-    }
-}
 
 use fastx::indexed::IndexedFastXReader;
 
@@ -112,8 +25,8 @@ use fastx::remote::RemoteReader;
 pub struct WasmRemoteIndexed
 {
     pub data_url: String,
-    pub fai_index: SimpleFaiIndex,
-    pub gzi_index: Option<SimpleGziIndex>,
+    pub fai_index: FaiIndex,
+    pub gzi_index: Option<GziIndex>,
 }
 
 /// Chromosome metadata (name and length)
@@ -229,7 +142,7 @@ impl Genome
     pub fn from_url_wasm(url: &str, fai_data: Vec<u8>, gzi_data: Option<Vec<u8>>) -> Result<Self>
     {
         // Parse FAI index using fastx
-        let fai_index = SimpleFaiIndex::from_reader(Cursor::new(fai_data))
+        let fai_index = FaiIndex::from_reader(Cursor::new(fai_data))
             .map_err(|e| anyhow::anyhow!("Failed to parse FAI: {}", e))?;
 
         // Parse GZI index if provided (for gzipped files)
@@ -238,7 +151,7 @@ impl Genome
             if url.ends_with(".gz")
             {
                 Some(
-                    SimpleGziIndex::from_bytes(&gzi)
+                    GziIndex::from_bytes(&gzi)
                         .map_err(|e| anyhow::anyhow!("Failed to parse GZI: {}", e))?,
                 )
             }
@@ -413,7 +326,7 @@ impl Genome
     async fn fetch_bgzf_sequence(
         url: &str,
         fai_entry: &FaiEntry,
-        gzi_index: &SimpleGziIndex,
+        gzi_index: &GziIndex,
         expected_length: usize,
     ) -> Result<Vec<u8>>
     {
