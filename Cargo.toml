@@ -3,6 +3,9 @@ name = "ugv"
 version = "0.1.1"
 edition = "2021"
 
+[profile.release]
+strip = true
+
 [dependencies]
 eframe = "0.33"
 egui = "0.33"
