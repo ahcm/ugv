@@ -1,5 +1,5 @@
 native: check-env
-	cargo make
+	cargo make build-versioned
 
 check-env:
 	@command -v cargo-make >/dev/null 2>&1 || { \
