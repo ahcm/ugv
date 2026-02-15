@@ -8,6 +8,13 @@ use noodles::sam;
 #[cfg(target_arch = "wasm32")]
 use std::io::Cursor;
 
+#[cfg(not(target_arch = "wasm32"))]
+use anyhow::Context;
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::{Path, PathBuf};
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::Arc;
+
 // Memory management constants
 const MAX_LOADED_REGION_SIZE: usize = 10_000_000; // 10Mb max region
 const MAX_LOADED_ALIGNMENTS: usize = 500_000; // Max 100k reads
@@ -357,6 +364,8 @@ pub struct AlignmentData
 {
     #[cfg(not(target_arch = "wasm32"))]
     pub bam_path: String,
+    #[cfg(not(target_arch = "wasm32"))]
+    _remote_storage: Option<Arc<RemoteBamStorage>>,
 
     #[cfg(target_arch = "wasm32")]
     pub bam_bytes: Vec<u8>,
@@ -367,6 +376,29 @@ pub struct AlignmentData
     // Currently loaded tracks (only for displayed region)
     pub loaded_tracks: HashMap<String, AlignmentTrack>,
     pub previous_tracks: HashMap<String, AlignmentTrack>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug)]
+struct RemoteBamStorage
+{
+    dir: PathBuf,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for RemoteBamStorage
+{
+    fn drop(&mut self)
+    {
+        if let Err(e) = std::fs::remove_dir_all(&self.dir)
+        {
+            eprintln!(
+                "Warning: failed to remove temporary BAM directory {}: {}",
+                self.dir.display(),
+                e
+            );
+        }
+    }
 }
 
 impl AlignmentData
@@ -399,6 +431,141 @@ impl AlignmentData
 
         Ok(AlignmentData {
             bam_path: bam_path.to_string(),
+            _remote_storage: None,
+            header,
+            reference_lengths,
+            loaded_tracks: HashMap::new(),
+            previous_tracks: HashMap::new(),
+        })
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn from_path_or_url(path_or_url: &str) -> Result<Self>
+    {
+        if path_or_url.starts_with("http://") || path_or_url.starts_with("https://")
+        {
+            return Self::from_url(path_or_url);
+        }
+        Self::from_file(path_or_url)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn from_url(url: &str) -> Result<Self>
+    {
+        use reqwest::StatusCode;
+        use std::fs::File;
+        use std::io::copy;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        fn download_to_path(
+            client: &reqwest::blocking::Client,
+            source_url: &str,
+            dest: &Path,
+        ) -> Result<()>
+        {
+            let mut response = client
+                .get(source_url)
+                .send()
+                .with_context(|| format!("Failed to download URL: {}", source_url))?;
+
+            if !response.status().is_success()
+            {
+                return Err(anyhow::anyhow!(
+                    "HTTP error {} while downloading {}",
+                    response.status(),
+                    source_url
+                ));
+            }
+
+            let mut file = File::create(dest)
+                .with_context(|| format!("Failed to create file {}", dest.display()))?;
+            copy(&mut response, &mut file)
+                .with_context(|| format!("Failed to write downloaded file {}", dest.display()))?;
+            Ok(())
+        }
+
+        fn download_optional_bai(
+            client: &reqwest::blocking::Client,
+            source_url: &str,
+            bam_path: &Path,
+        ) -> Result<bool>
+        {
+            let response = client
+                .get(source_url)
+                .send()
+                .with_context(|| format!("Failed to check BAM index URL: {}", source_url))?;
+
+            if response.status() == StatusCode::NOT_FOUND
+            {
+                return Ok(false);
+            }
+            if !response.status().is_success()
+            {
+                return Ok(false);
+            }
+
+            let bytes = response
+                .bytes()
+                .with_context(|| format!("Failed to read BAM index response body: {}", source_url))?;
+
+            // Write both common index path variants so noodles can find one.
+            let bam_dot_bai = PathBuf::from(format!("{}.bai", bam_path.display()));
+            let bai_ext = bam_path.with_extension("bai");
+            std::fs::write(&bam_dot_bai, &bytes)
+                .with_context(|| format!("Failed to write index file {}", bam_dot_bai.display()))?;
+            std::fs::write(&bai_ext, &bytes)
+                .with_context(|| format!("Failed to write index file {}", bai_ext.display()))?;
+            Ok(true)
+        }
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!("ugv-bam-{}-{}", std::process::id(), unique));
+        std::fs::create_dir_all(&temp_dir)
+            .with_context(|| format!("Failed to create temp directory {}", temp_dir.display()))?;
+
+        let storage = Arc::new(RemoteBamStorage { dir: temp_dir.clone() });
+        let bam_path = temp_dir.join("remote.bam");
+
+        let client = reqwest::blocking::Client::builder()
+            .build()
+            .context("Failed to create HTTP client for BAM download")?;
+
+        download_to_path(&client, url, &bam_path)?;
+
+        let mut bai_candidates = vec![format!("{}.bai", url)];
+        if let Some(stripped) = url.strip_suffix(".bam")
+        {
+            bai_candidates.push(format!("{}.bai", stripped));
+        }
+
+        let mut found_bai = false;
+        for candidate in bai_candidates
+        {
+            if download_optional_bai(&client, &candidate, &bam_path)?
+            {
+                found_bai = true;
+                break;
+            }
+        }
+
+        if !found_bai
+        {
+            eprintln!(
+                "Warning: no remote BAM index found for {} (.bam.bai/.bai); region queries may be slow",
+                url
+            );
+        }
+
+        let mut reader = bam::io::Reader::new(File::open(&bam_path)?);
+        let header = reader.read_header()?;
+        let reference_lengths = Self::extract_reference_lengths(&header);
+
+        Ok(AlignmentData {
+            bam_path: bam_path.display().to_string(),
+            _remote_storage: Some(storage),
             header,
             reference_lengths,
             loaded_tracks: HashMap::new(),

@@ -168,6 +168,7 @@ cargo run --release
 3. **Load Sequencing Data** (optional): Click "Open BAM..." and select your alignment file
    - Supports: `.bam` (Binary Alignment/Map format)
    - Works with both native and WebAssembly builds
+   - Native build also supports BAM URLs via "Load URL"; it will try `<url>.bai` and `<url with .bam replaced by .bai>` for indexed region queries
    - Enable/disable individual tracks using checkboxes:
      - "Show coverage": Read depth histogram
      - "Show reads": Individual aligned reads with stacking

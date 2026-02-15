@@ -1807,7 +1807,7 @@ impl GenomeViewer
             return;
         }
 
-        match bam::AlignmentData::from_file(&self.bam_path)
+        match bam::AlignmentData::from_path_or_url(&self.bam_path)
         {
             Ok(alignments) =>
             {
