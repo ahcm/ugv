@@ -145,7 +145,8 @@ This will:
 
 To test locally:
 ```bash
-python3 -m http.server 8080
+cargo install miniserve
+miniserve wasm -p 8080
 # Open http://localhost:8080 in your browser
 ```
 
@@ -356,7 +357,8 @@ This will:
 Start a local web server:
 
 ```bash
-python3 -m http.server 8080
+cargo install miniserve
+miniserve wasm -p 8080
 ```
 
 Then open http://localhost:8080 in your browser.

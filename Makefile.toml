@@ -65,6 +65,7 @@ args = ["build", "--release", "--target", "x86_64-pc-windows-gnu"]
 description = "Serves the WASM project locally"
 script = [
     "echo \"Starting server at http://localhost:8080\"",
-    "python3 -m http.server 8080"
+    "cargo install miniserve",
+    "miniserve wasm -p 8080"
 ]
 
