@@ -1,5 +1,5 @@
 [tasks.build-versioned]
-description = "Builds release and renames with version"
+description = "Builds release and names with version"
 script = [
     "echo Building for target: ${CARGO_MAKE_BUILD_TARGET:-host}",
     "cargo build --release",
@@ -24,6 +24,43 @@ args = [
 ]
 dependencies = ["wasm-cargo-build"]
 
+[tasks.build-wasm]
+description = "Builds the WASM project and bindings"
+dependencies = ["wasm-bindgen"]
+
+[tasks.check-windows]
+description = "Checks cross-compilation preliminaries for UGV for Windows (x86_64-pc-windows-gnu)"
+command = "bash"
+args = [
+  "-lc",
+  '''
+set -e
+
+echo "Building UGV for Windows (x86_64)..."
+
+if ! rustup target list --installed | grep -q "x86_64-pc-windows-gnu"; then
+  echo "Installing Windows target..."
+  rustup target add x86_64-pc-windows-gnu
+fi
+
+if ! command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1; then
+  echo
+  echo "ERROR: mingw-w64 is not installed!"
+  echo "Please install it first:"
+  echo "  Ubuntu/Debian: sudo apt install mingw-w64"
+  echo "  Fedora:        sudo dnf install mingw64-gcc"
+  echo "  Arch:          sudo pacman -S mingw-w64-gcc"
+  exit 1
+fi
+  '''
+]
+
+[tasks.build-windows]
+description = "Cross-compiles UGV for Windows (x86_64-pc-windows-gnu)"
+dependencies = ["check-windows"]
+command = "cargo"
+args = ["build", "--release", "--target", "x86_64-pc-windows-gnu"]
+
 [tasks.serve]
 description = "Serves the WASM project locally"
 script = [
@@ -31,6 +68,3 @@ script = [
     "python3 -m http.server 8080"
 ]
 
-[tasks.build-wasm]
-description = "Builds the WASM project and bindings"
-dependencies = ["wasm-bindgen"]

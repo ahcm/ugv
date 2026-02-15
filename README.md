@@ -117,12 +117,12 @@ When amino acid frames are enabled, amino acids are color-coded by type:
 ```bash
 git clone <repository-url>
 cd ugv
-cargo build --release
+make
 ```
 
 #### Cross-Compile for Windows (from Linux)
 ```bash
-./build_windows.sh
+make windows
 ```
 
 Requirements:
@@ -135,7 +135,7 @@ Output: `target/x86_64-pc-windows-gnu/release/ugv.exe`
 
 #### WebAssembly Build
 ```bash
-./build_wasm.sh
+make wasm
 ```
 
 This will:
@@ -343,8 +343,7 @@ The viewer can be compiled to WebAssembly for browser deployment.
 Use the provided build script:
 
 ```bash
-chmod +x build_wasm.sh
-./build_wasm.sh
+make wasm
 ```
 
 This will:
@@ -378,7 +377,7 @@ cargo install wasm-bindgen-cli
 
 # Generate bindings
 wasm-bindgen target/wasm32-unknown-unknown/release/ugv.wasm \
-    --out-dir . \
+    --out-dir wasm \
     --target web \
     --no-typescript
 ```
@@ -427,7 +426,7 @@ The WebAssembly version supports three methods for loading files:
 
 ## License
 
-[Add your license here]
+EUPL 1.2
 
 ## Contributing
 

@@ -1,4 +1,4 @@
-all: check-env
+native: check-env
 	cargo make
 
 check-env:
@@ -7,3 +7,9 @@ check-env:
 		echo "\033[0;32mPlease install it by running\033[0m:\n\033[1m$$ cargo install cargo-make\033[0m"; \
 		exit 1; \
 	}
+
+windows: check-env
+	cargo make build-windows
+
+wasm: check-env
+	cargo make build-wasm
