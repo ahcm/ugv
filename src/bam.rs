@@ -11,6 +11,8 @@ use std::io::Cursor;
 #[cfg(not(target_arch = "wasm32"))]
 use anyhow::Context;
 #[cfg(not(target_arch = "wasm32"))]
+use std::io::{self, Cursor, Read, Seek, SeekFrom};
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
@@ -366,6 +368,8 @@ pub struct AlignmentData
     pub bam_path: String,
     #[cfg(not(target_arch = "wasm32"))]
     _remote_storage: Option<Arc<RemoteBamStorage>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    remote_source: Option<Arc<RemoteBamSource>>,
 
     #[cfg(target_arch = "wasm32")]
     pub bam_bytes: Vec<u8>,
@@ -383,6 +387,152 @@ pub struct AlignmentData
 struct RemoteBamStorage
 {
     dir: PathBuf,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Clone)]
+struct RemoteBamSource
+{
+    url: String,
+    bai_data: Vec<u8>,
+    content_length: u64,
+    client: reqwest::blocking::Client,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct HttpRangeReader
+{
+    client: reqwest::blocking::Client,
+    url: String,
+    position: u64,
+    content_length: u64,
+    cache_start: u64,
+    cache_data: Vec<u8>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl HttpRangeReader
+{
+    const FETCH_WINDOW_BYTES: u64 = 1_048_576; // 1 MiB
+
+    fn new(client: reqwest::blocking::Client, url: String, content_length: u64) -> Self
+    {
+        Self {
+            client,
+            url,
+            position: 0,
+            content_length,
+            cache_start: 0,
+            cache_data: Vec::new(),
+        }
+    }
+
+    fn cache_end(&self) -> u64
+    {
+        self.cache_start + self.cache_data.len() as u64
+    }
+
+    fn refill_cache(&mut self, min_bytes: usize) -> io::Result<()>
+    {
+        if self.position >= self.content_length
+        {
+            self.cache_data.clear();
+            return Ok(());
+        }
+
+        let want = std::cmp::max(min_bytes as u64, Self::FETCH_WINDOW_BYTES);
+        let start = self.position;
+        let end = (start + want - 1).min(self.content_length - 1);
+        let range_value = format!("bytes={}-{}", start, end);
+
+        let response = self
+            .client
+            .get(&self.url)
+            .header(reqwest::header::RANGE, range_value)
+            .send()
+            .map_err(io::Error::other)?;
+
+        let status = response.status();
+        if !(status == reqwest::StatusCode::PARTIAL_CONTENT || status == reqwest::StatusCode::OK)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                format!("unexpected HTTP status {} while reading {}", status, self.url),
+            ));
+        }
+
+        let bytes = response.bytes().map_err(io::Error::other)?;
+        self.cache_start = start;
+        self.cache_data = bytes.to_vec();
+        Ok(())
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Read for HttpRangeReader
+{
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize>
+    {
+        if buf.is_empty()
+        {
+            return Ok(0);
+        }
+        if self.position >= self.content_length
+        {
+            return Ok(0);
+        }
+
+        if self.position < self.cache_start || self.position >= self.cache_end()
+        {
+            self.refill_cache(buf.len())?;
+        }
+
+        if self.cache_data.is_empty()
+        {
+            return Ok(0);
+        }
+
+        let cache_offset = (self.position - self.cache_start) as usize;
+        if cache_offset >= self.cache_data.len()
+        {
+            self.refill_cache(buf.len())?;
+            if self.cache_data.is_empty()
+            {
+                return Ok(0);
+            }
+        }
+
+        let available = &self.cache_data[(self.position - self.cache_start) as usize..];
+        let to_copy = std::cmp::min(buf.len(), available.len());
+        buf[..to_copy].copy_from_slice(&available[..to_copy]);
+        self.position += to_copy as u64;
+        Ok(to_copy)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Seek for HttpRangeReader
+{
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64>
+    {
+        let new_pos: i128 = match pos
+        {
+            SeekFrom::Start(offset) => offset as i128,
+            SeekFrom::Current(delta) => self.position as i128 + delta as i128,
+            SeekFrom::End(delta) => self.content_length as i128 + delta as i128,
+        };
+
+        if new_pos < 0
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "invalid seek to negative position",
+            ));
+        }
+
+        self.position = (new_pos as u64).min(self.content_length);
+        Ok(self.position)
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -432,6 +582,7 @@ impl AlignmentData
         Ok(AlignmentData {
             bam_path: bam_path.to_string(),
             _remote_storage: None,
+            remote_source: None,
             header,
             reference_lengths,
             loaded_tracks: HashMap::new(),
@@ -452,10 +603,73 @@ impl AlignmentData
     #[cfg(not(target_arch = "wasm32"))]
     fn from_url(url: &str) -> Result<Self>
     {
-        use reqwest::StatusCode;
+        use reqwest::{StatusCode, header};
         use std::fs::File;
         use std::io::copy;
         use std::time::{SystemTime, UNIX_EPOCH};
+
+        fn fetch_content_length(client: &reqwest::blocking::Client, source_url: &str) -> Result<u64>
+        {
+            // Prefer HEAD, but fall back to GET range probe when servers do not support HEAD.
+            if let Ok(response) = client.head(source_url).send()
+            {
+                if response.status().is_success()
+                {
+                    if let Some(len) = response
+                        .headers()
+                        .get(header::CONTENT_LENGTH)
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|v| v.parse::<u64>().ok())
+                    {
+                        return Ok(len);
+                    }
+                }
+            }
+
+            let response = client
+                .get(source_url)
+                .header(header::RANGE, "bytes=0-0")
+                .send()
+                .with_context(|| format!("Failed to probe content length for {}", source_url))?;
+
+            if !response.status().is_success() && response.status() != StatusCode::PARTIAL_CONTENT
+            {
+                return Err(anyhow::anyhow!(
+                    "HTTP error {} while probing content length for {}",
+                    response.status(),
+                    source_url
+                ));
+            }
+
+            if let Some(content_range) = response
+                .headers()
+                .get(header::CONTENT_RANGE)
+                .and_then(|v| v.to_str().ok())
+            {
+                // Format: bytes 0-0/12345
+                if let Some(total) = content_range.split('/').nth(1)
+                {
+                    if let Ok(len) = total.parse::<u64>()
+                    {
+                        return Ok(len);
+                    }
+                }
+            }
+
+            if let Some(len) = response
+                .headers()
+                .get(header::CONTENT_LENGTH)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<u64>().ok())
+            {
+                return Ok(len);
+            }
+
+            Err(anyhow::anyhow!(
+                "Could not determine content length for {}",
+                source_url
+            ))
+        }
 
         fn download_to_path(
             client: &reqwest::blocking::Client,
@@ -484,11 +698,10 @@ impl AlignmentData
             Ok(())
         }
 
-        fn download_optional_bai(
+        fn download_optional_bai_bytes(
             client: &reqwest::blocking::Client,
             source_url: &str,
-            bam_path: &Path,
-        ) -> Result<bool>
+        ) -> Result<Option<Vec<u8>>>
         {
             let response = client
                 .get(source_url)
@@ -497,25 +710,92 @@ impl AlignmentData
 
             if response.status() == StatusCode::NOT_FOUND
             {
-                return Ok(false);
+                return Ok(None);
             }
             if !response.status().is_success()
             {
-                return Ok(false);
+                return Ok(None);
             }
 
             let bytes = response
                 .bytes()
                 .with_context(|| format!("Failed to read BAM index response body: {}", source_url))?;
+            Ok(Some(bytes.to_vec()))
+        }
 
-            // Write both common index path variants so noodles can find one.
-            let bam_dot_bai = PathBuf::from(format!("{}.bai", bam_path.display()));
-            let bai_ext = bam_path.with_extension("bai");
-            std::fs::write(&bam_dot_bai, &bytes)
-                .with_context(|| format!("Failed to write index file {}", bam_dot_bai.display()))?;
-            std::fs::write(&bai_ext, &bytes)
-                .with_context(|| format!("Failed to write index file {}", bai_ext.display()))?;
-            Ok(true)
+        let client = reqwest::blocking::Client::builder()
+            .build()
+            .context("Failed to create HTTP client for BAM download")?;
+
+        let mut bai_candidates = vec![format!("{}.bai", url)];
+        if let Some(stripped) = url.strip_suffix(".bam")
+        {
+            bai_candidates.push(format!("{}.bai", stripped));
+        }
+
+        let mut bai_data = None;
+        for candidate in bai_candidates
+        {
+            if let Some(index_bytes) = download_optional_bai_bytes(&client, &candidate)?
+            {
+                bai_data = Some(index_bytes);
+                break;
+            }
+        }
+
+        let has_remote_index = bai_data.is_some();
+        if let Some(bai_data) = bai_data
+        {
+            let ranged_result: Result<Self> = (|| {
+                let content_length = fetch_content_length(&client, url)?;
+
+                let mut index_reader = bam::bai::io::Reader::new(Cursor::new(&bai_data));
+                let index = index_reader.read_index()?;
+
+                let range_reader =
+                    HttpRangeReader::new(client.clone(), url.to_string(), content_length);
+                let mut reader = bam::io::indexed_reader::Builder::default()
+                    .set_index(index)
+                    .build_from_reader(range_reader)?;
+
+                let header = reader.read_header()?;
+                let reference_lengths = Self::extract_reference_lengths(&header);
+
+                Ok(AlignmentData {
+                    bam_path: url.to_string(),
+                    _remote_storage: None,
+                    remote_source: Some(Arc::new(RemoteBamSource {
+                        url: url.to_string(),
+                        bai_data: bai_data.clone(),
+                        content_length,
+                        client: client.clone(),
+                    })),
+                    header,
+                    reference_lengths,
+                    loaded_tracks: HashMap::new(),
+                    previous_tracks: HashMap::new(),
+                })
+            })();
+
+            match ranged_result
+            {
+                Ok(data) => return Ok(data),
+                Err(e) =>
+                {
+                    eprintln!(
+                        "Warning: failed to initialize ranged BAM reader for {} ({}); falling back to full download",
+                        url, e
+                    );
+                }
+            }
+        }
+
+        if !has_remote_index
+        {
+            eprintln!(
+                "Warning: no remote BAM index found for {} (.bam.bai/.bai); falling back to full download",
+                url
+            );
         }
 
         let unique = SystemTime::now()
@@ -528,35 +808,15 @@ impl AlignmentData
 
         let storage = Arc::new(RemoteBamStorage { dir: temp_dir.clone() });
         let bam_path = temp_dir.join("remote.bam");
-
-        let client = reqwest::blocking::Client::builder()
-            .build()
-            .context("Failed to create HTTP client for BAM download")?;
-
         download_to_path(&client, url, &bam_path)?;
 
-        let mut bai_candidates = vec![format!("{}.bai", url)];
-        if let Some(stripped) = url.strip_suffix(".bam")
+        // Keep compatibility with build_from_path index auto-discovery if a sidecar index appears.
+        if let Some(index_bytes) = download_optional_bai_bytes(&client, &format!("{}.bai", url))?
         {
-            bai_candidates.push(format!("{}.bai", stripped));
-        }
-
-        let mut found_bai = false;
-        for candidate in bai_candidates
-        {
-            if download_optional_bai(&client, &candidate, &bam_path)?
-            {
-                found_bai = true;
-                break;
-            }
-        }
-
-        if !found_bai
-        {
-            eprintln!(
-                "Warning: no remote BAM index found for {} (.bam.bai/.bai); region queries may be slow",
-                url
-            );
+            let bam_dot_bai = PathBuf::from(format!("{}.bai", bam_path.display()));
+            let bai_ext = bam_path.with_extension("bai");
+            let _ = std::fs::write(&bam_dot_bai, &index_bytes);
+            let _ = std::fs::write(&bai_ext, &index_bytes);
         }
 
         let mut reader = bam::io::Reader::new(File::open(&bam_path)?);
@@ -566,6 +826,7 @@ impl AlignmentData
         Ok(AlignmentData {
             bam_path: bam_path.display().to_string(),
             _remote_storage: Some(storage),
+            remote_source: None,
             header,
             reference_lengths,
             loaded_tracks: HashMap::new(),
@@ -691,14 +952,22 @@ impl AlignmentData
         let mut track = AlignmentTrack::new(chromosome.to_string(), reference_length);
         track.loaded_region = Some((start, end));
 
-        // Try to use indexed reader
-        let indexed_result =
-            bam::io::indexed_reader::Builder::default().build_from_path(&self.bam_path);
-
-        if let Ok(mut reader) = indexed_result
+        if let Some(remote_source) = self.remote_source.clone()
         {
-            // Use indexed query for efficient region loading
-            let region = format!("{}:{}-{}", chromosome, start + 1, end); // 1-based for noodles
+            let mut index_reader =
+                bam::bai::io::Reader::new(Cursor::new(remote_source.bai_data.as_slice()));
+            let index = index_reader.read_index()?;
+
+            let range_reader = HttpRangeReader::new(
+                remote_source.client.clone(),
+                remote_source.url.clone(),
+                remote_source.content_length,
+            );
+            let mut reader = bam::io::indexed_reader::Builder::default()
+                .set_index(index)
+                .build_from_reader(range_reader)?;
+
+            let region = format!("{}:{}-{}", chromosome, start + 1, end);
             if let Ok(region) = region.parse::<Region>()
             {
                 let header = reader.read_header()?;
@@ -727,42 +996,78 @@ impl AlignmentData
         }
         else
         {
-            // Fallback: no index available, scan entire file (slow)
-            eprintln!(
-                "Warning: BAM index not found for {}, scanning entire file (slow)",
-                self.bam_path
-            );
+            // Try local indexed reader first.
+            let indexed_result =
+                bam::io::indexed_reader::Builder::default().build_from_path(&self.bam_path);
 
-            use std::fs::File;
-            let mut reader = bam::io::Reader::new(File::open(&self.bam_path)?);
-            let header = reader.read_header()?;
-
-            let mut count = 0;
-            for result in reader.records()
+            if let Ok(mut reader) = indexed_result
             {
-                if count >= MAX_LOADED_ALIGNMENTS
+                let region = format!("{}:{}-{}", chromosome, start + 1, end);
+                if let Ok(region) = region.parse::<Region>()
                 {
-                    break;
-                }
+                    let header = reader.read_header()?;
+                    let query = reader.query(&header, &region)?;
 
-                let record = result?;
-
-                // Check if record is in our region
-                if let Some(Ok(ref_seq_id)) = record.reference_sequence_id()
-                {
-                    if let Some((ref_name, _)) = header.reference_sequences().get_index(ref_seq_id)
+                    let mut count = 0;
+                    for result in query.records()
                     {
-                        if ref_name.to_string() == chromosome
+                        if count >= MAX_LOADED_ALIGNMENTS
                         {
-                            if let Some(Ok(pos)) = record.alignment_start()
+                            eprintln!(
+                                "Warning: Hit alignment limit of {} for region",
+                                MAX_LOADED_ALIGNMENTS
+                            );
+                            break;
+                        }
+
+                        let record = result?;
+                        if let Some(alignment) = Self::parse_record(&record)?
+                        {
+                            track.records.push(alignment);
+                            count += 1;
+                        }
+                    }
+                }
+            }
+            else
+            {
+                // Fallback: no index available, scan entire file (slow)
+                eprintln!(
+                    "Warning: BAM index not found for {}, scanning entire file (slow)",
+                    self.bam_path
+                );
+
+                use std::fs::File;
+                let mut reader = bam::io::Reader::new(File::open(&self.bam_path)?);
+                let header = reader.read_header()?;
+
+                let mut count = 0;
+                for result in reader.records()
+                {
+                    if count >= MAX_LOADED_ALIGNMENTS
+                    {
+                        break;
+                    }
+
+                    let record = result?;
+
+                    // Check if record is in our region
+                    if let Some(Ok(ref_seq_id)) = record.reference_sequence_id()
+                    {
+                        if let Some((ref_name, _)) = header.reference_sequences().get_index(ref_seq_id)
+                        {
+                            if ref_name.to_string() == chromosome
                             {
-                                let pos_0based = usize::from(pos) - 1;
-                                if pos_0based >= start && pos_0based <= end
+                                if let Some(Ok(pos)) = record.alignment_start()
                                 {
-                                    if let Some(alignment) = Self::parse_record(&record)?
+                                    let pos_0based = usize::from(pos) - 1;
+                                    if pos_0based >= start && pos_0based <= end
                                     {
-                                        track.records.push(alignment);
-                                        count += 1;
+                                        if let Some(alignment) = Self::parse_record(&record)?
+                                        {
+                                            track.records.push(alignment);
+                                            count += 1;
+                                        }
                                     }
                                 }
                             }
