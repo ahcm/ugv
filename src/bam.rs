@@ -608,7 +608,8 @@ impl AlignmentData
         use std::io::copy;
         use std::time::{SystemTime, UNIX_EPOCH};
 
-        fn fetch_content_length(client: &reqwest::blocking::Client, source_url: &str) -> Result<u64>
+        fn fetch_content_length(client: &reqwest::blocking::Client, source_url: &str)
+        -> Result<u64>
         {
             // Prefer HEAD, but fall back to GET range probe when servers do not support HEAD.
             if let Ok(response) = client.head(source_url).send()
@@ -665,10 +666,7 @@ impl AlignmentData
                 return Ok(len);
             }
 
-            Err(anyhow::anyhow!(
-                "Could not determine content length for {}",
-                source_url
-            ))
+            Err(anyhow::anyhow!("Could not determine content length for {}", source_url))
         }
 
         fn download_to_path(
@@ -717,9 +715,9 @@ impl AlignmentData
                 return Ok(None);
             }
 
-            let bytes = response
-                .bytes()
-                .with_context(|| format!("Failed to read BAM index response body: {}", source_url))?;
+            let bytes = response.bytes().with_context(|| {
+                format!("Failed to read BAM index response body: {}", source_url)
+            })?;
             Ok(Some(bytes.to_vec()))
         }
 
@@ -802,11 +800,14 @@ impl AlignmentData
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        let temp_dir = std::env::temp_dir().join(format!("ugv-bam-{}-{}", std::process::id(), unique));
+        let temp_dir =
+            std::env::temp_dir().join(format!("ugv-bam-{}-{}", std::process::id(), unique));
         std::fs::create_dir_all(&temp_dir)
             .with_context(|| format!("Failed to create temp directory {}", temp_dir.display()))?;
 
-        let storage = Arc::new(RemoteBamStorage { dir: temp_dir.clone() });
+        let storage = Arc::new(RemoteBamStorage {
+            dir: temp_dir.clone(),
+        });
         let bam_path = temp_dir.join("remote.bam");
         download_to_path(&client, url, &bam_path)?;
 
@@ -1054,7 +1055,8 @@ impl AlignmentData
                     // Check if record is in our region
                     if let Some(Ok(ref_seq_id)) = record.reference_sequence_id()
                     {
-                        if let Some((ref_name, _)) = header.reference_sequences().get_index(ref_seq_id)
+                        if let Some((ref_name, _)) =
+                            header.reference_sequences().get_index(ref_seq_id)
                         {
                             if ref_name.to_string() == chromosome
                             {
