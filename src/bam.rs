@@ -413,7 +413,7 @@ struct HttpRangeReader
 #[cfg(not(target_arch = "wasm32"))]
 impl HttpRangeReader
 {
-    const FETCH_WINDOW_BYTES: u64 = 1_048_576; // 1 MiB
+    const FETCH_WINDOW_BYTES: u64 = 30_048_576; // 1 MiB
 
     fn new(client: reqwest::blocking::Client, url: String, content_length: u64) -> Self
     {
