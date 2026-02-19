@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 // Memory management constants
 const MAX_LOADED_REGION_SIZE: usize = 10_000_000; // 10Mb max region
-const MAX_LOADED_ALIGNMENTS: usize = 500_000; // Max 100k reads
+const MAX_LOADED_ALIGNMENTS: usize = 5_000_000; // Max 5m reads
 const VIEWPORT_BUFFER_MIN: usize = 100_000; // 100Kb min buffer around viewport
 const VIEWPORT_BUFFER_MAX: usize = 2_000_000; // 2Mb max buffer around viewport
 
