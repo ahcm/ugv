@@ -3340,45 +3340,53 @@ impl eframe::App for GenomeViewer
                                 let track_name = format!("{:?}", track_type);
 
                                 let row_response = ui.group(|ui| {
-                                    ui.horizontal(|ui| {
-                                        ui.label(egui::RichText::new("::").monospace());
-                                        ui.label(egui::RichText::new(&track_name).strong());
+                                    let drag_handle_response = ui
+                                        .horizontal(|ui| {
+                                            let handle_response = ui.add(
+                                                egui::Label::new(
+                                                    egui::RichText::new("::").monospace(),
+                                                )
+                                                .sense(egui::Sense::drag()),
+                                            );
+                                            ui.label(egui::RichText::new(&track_name).strong());
 
-                                        // Reorder buttons
-                                        ui.with_layout(
-                                            egui::Layout::right_to_left(egui::Align::Center),
-                                            |ui| {
-                                                let can_move_down = idx < ordered_len - 1;
-                                                if ui
-                                                    .add_enabled(
-                                                        can_move_down,
-                                                        egui::Button::new("Down"),
-                                                    )
-                                                    .clicked()
-                                                {
-                                                    // Move down
-                                                    if reorder_action.is_none()
+                                            // Reorder buttons
+                                            ui.with_layout(
+                                                egui::Layout::right_to_left(egui::Align::Center),
+                                                |ui| {
+                                                    let can_move_down = idx < ordered_len - 1;
+                                                    if ui
+                                                        .add_enabled(
+                                                            can_move_down,
+                                                            egui::Button::new("Down"),
+                                                        )
+                                                        .clicked()
                                                     {
-                                                        reorder_action = Some((idx, idx + 1));
+                                                        // Move down
+                                                        if reorder_action.is_none()
+                                                        {
+                                                            reorder_action = Some((idx, idx + 1));
+                                                        }
                                                     }
-                                                }
-                                                let can_move_up = idx > 0;
-                                                if ui
-                                                    .add_enabled(
-                                                        can_move_up,
-                                                        egui::Button::new("Up"),
-                                                    )
-                                                    .clicked()
-                                                {
-                                                    // Move up
-                                                    if reorder_action.is_none()
+                                                    let can_move_up = idx > 0;
+                                                    if ui
+                                                        .add_enabled(
+                                                            can_move_up,
+                                                            egui::Button::new("Up"),
+                                                        )
+                                                        .clicked()
                                                     {
-                                                        reorder_action = Some((idx, idx - 1));
+                                                        // Move up
+                                                        if reorder_action.is_none()
+                                                        {
+                                                            reorder_action = Some((idx, idx - 1));
+                                                        }
                                                     }
-                                                }
-                                            },
-                                        );
-                                    });
+                                                },
+                                            );
+                                            handle_response
+                                        })
+                                        .inner;
 
                                     // Height slider for adjustable tracks
                                     match track_type
@@ -3457,14 +3465,10 @@ impl eframe::App for GenomeViewer
                                     let config_mut =
                                         self.track_configs.get_mut(&track_type).unwrap();
                                     ui.checkbox(&mut config_mut.visible, "Visible");
+                                    drag_handle_response
                                 });
 
-                                let row_id = egui::Id::new(("track_row", track_type));
-                                let drag_response = ui.interact(
-                                    row_response.response.rect,
-                                    row_id,
-                                    egui::Sense::drag(),
-                                );
+                                let drag_response = row_response.inner;
 
                                 if drag_response.drag_started()
                                 {
