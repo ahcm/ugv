@@ -20,7 +20,8 @@ use std::sync::Arc;
 // Memory management constants
 const MAX_LOADED_REGION_SIZE: usize = 10_000_000; // 10Mb max region
 const MAX_LOADED_ALIGNMENTS: usize = 100_000_000; // Max 100m reads
-const MAX_LOADED_ALIGNMENT_BYTES: usize = 4 * 1024 * 1024 * 1024; // 4 GiB soft cap
+pub const DEFAULT_BAM_MEMORY_BUDGET_MIB: usize = 4096; // 4 GiB default budget
+const MAX_LOADED_ALIGNMENT_BYTES: usize = DEFAULT_BAM_MEMORY_BUDGET_MIB * 1024 * 1024;
 const VIEWPORT_BUFFER_MIN: usize = 100_000; // 100Kb min buffer around viewport
 const VIEWPORT_BUFFER_MAX: usize = 2_000_000; // 2Mb max buffer around viewport
 
@@ -393,6 +394,7 @@ pub struct AlignmentData
     // Currently loaded tracks (only for displayed region)
     pub loaded_tracks: HashMap<String, AlignmentTrack>,
     pub previous_tracks: HashMap<String, AlignmentTrack>,
+    max_loaded_alignment_bytes: usize,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -566,10 +568,23 @@ impl Drop for RemoteBamStorage
 
 impl AlignmentData
 {
-    fn hit_alignment_limit(count: usize, loaded_bytes: usize, next_alignment_bytes: usize) -> bool
+    pub fn set_memory_budget_mib(&mut self, budget_mib: usize)
+    {
+        let min_mib = 256usize;
+        let max_mib = 64 * 1024usize;
+        let clamped_mib = budget_mib.clamp(min_mib, max_mib);
+        self.max_loaded_alignment_bytes = clamped_mib * 1024 * 1024;
+    }
+
+    fn hit_alignment_limit(
+        &self,
+        count: usize,
+        loaded_bytes: usize,
+        next_alignment_bytes: usize,
+    ) -> bool
     {
         count >= MAX_LOADED_ALIGNMENTS
-            || loaded_bytes.saturating_add(next_alignment_bytes) > MAX_LOADED_ALIGNMENT_BYTES
+            || loaded_bytes.saturating_add(next_alignment_bytes) > self.max_loaded_alignment_bytes
     }
 
     fn extract_reference_lengths(header: &sam::Header) -> HashMap<String, usize>
@@ -606,6 +621,7 @@ impl AlignmentData
             reference_lengths,
             loaded_tracks: HashMap::new(),
             previous_tracks: HashMap::new(),
+            max_loaded_alignment_bytes: MAX_LOADED_ALIGNMENT_BYTES,
         })
     }
 
@@ -791,6 +807,7 @@ impl AlignmentData
                     reference_lengths,
                     loaded_tracks: HashMap::new(),
                     previous_tracks: HashMap::new(),
+                    max_loaded_alignment_bytes: MAX_LOADED_ALIGNMENT_BYTES,
                 })
             })();
 
@@ -851,6 +868,7 @@ impl AlignmentData
             reference_lengths,
             loaded_tracks: HashMap::new(),
             previous_tracks: HashMap::new(),
+            max_loaded_alignment_bytes: MAX_LOADED_ALIGNMENT_BYTES,
         })
     }
 
@@ -869,6 +887,7 @@ impl AlignmentData
             reference_lengths,
             loaded_tracks: HashMap::new(),
             previous_tracks: HashMap::new(),
+            max_loaded_alignment_bytes: MAX_LOADED_ALIGNMENT_BYTES,
         })
     }
 
@@ -1001,12 +1020,12 @@ impl AlignmentData
                     if let Some(alignment) = Self::parse_record(&record)?
                     {
                         let alignment_bytes = alignment.estimated_bytes();
-                        if Self::hit_alignment_limit(count, loaded_bytes, alignment_bytes)
+                        if self.hit_alignment_limit(count, loaded_bytes, alignment_bytes)
                         {
                             eprintln!(
                                 "Warning: Hit loading limit for region (max {} alignments or {} MiB estimated)",
                                 MAX_LOADED_ALIGNMENTS,
-                                MAX_LOADED_ALIGNMENT_BYTES / (1024 * 1024)
+                                self.max_loaded_alignment_bytes / (1024 * 1024)
                             );
                             break;
                         }
@@ -1039,12 +1058,12 @@ impl AlignmentData
                         if let Some(alignment) = Self::parse_record(&record)?
                         {
                             let alignment_bytes = alignment.estimated_bytes();
-                            if Self::hit_alignment_limit(count, loaded_bytes, alignment_bytes)
+                            if self.hit_alignment_limit(count, loaded_bytes, alignment_bytes)
                             {
                                 eprintln!(
                                     "Warning: Hit loading limit for region (max {} alignments or {} MiB estimated)",
                                     MAX_LOADED_ALIGNMENTS,
-                                    MAX_LOADED_ALIGNMENT_BYTES / (1024 * 1024)
+                                    self.max_loaded_alignment_bytes / (1024 * 1024)
                                 );
                                 break;
                             }
@@ -1089,7 +1108,7 @@ impl AlignmentData
                                         if let Some(alignment) = Self::parse_record(&record)?
                                         {
                                             let alignment_bytes = alignment.estimated_bytes();
-                                            if Self::hit_alignment_limit(
+                                            if self.hit_alignment_limit(
                                                 count,
                                                 loaded_bytes,
                                                 alignment_bytes,
@@ -1098,7 +1117,7 @@ impl AlignmentData
                                                 eprintln!(
                                                     "Warning: Hit loading limit for region (max {} alignments or {} MiB estimated)",
                                                     MAX_LOADED_ALIGNMENTS,
-                                                    MAX_LOADED_ALIGNMENT_BYTES / (1024 * 1024)
+                                                    self.max_loaded_alignment_bytes / (1024 * 1024)
                                                 );
                                                 break;
                                             }
@@ -1188,12 +1207,12 @@ impl AlignmentData
                         if let Some(alignment) = Self::parse_record(&record)?
                         {
                             let alignment_bytes = alignment.estimated_bytes();
-                            if Self::hit_alignment_limit(count, loaded_bytes, alignment_bytes)
+                            if self.hit_alignment_limit(count, loaded_bytes, alignment_bytes)
                             {
                                 eprintln!(
                                     "Warning: Hit loading limit for chromosome (max {} alignments or {} MiB estimated)",
                                     MAX_LOADED_ALIGNMENTS,
-                                    MAX_LOADED_ALIGNMENT_BYTES / (1024 * 1024)
+                                    self.max_loaded_alignment_bytes / (1024 * 1024)
                                 );
                                 break;
                             }

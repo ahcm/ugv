@@ -209,6 +209,7 @@ struct GenomeViewer
     alignments: Option<bam::AlignmentData>,
     bam_path: String,
     max_reads_display: usize,
+    bam_memory_budget_mib: usize,
     // TSV custom tracks
     tsv_data: Option<tsv::TsvData>,
     tsv_path: String,
@@ -377,6 +378,7 @@ impl GenomeViewer
             alignments: None,
             bam_path: String::new(),
             max_reads_display: 1000,
+            bam_memory_budget_mib: bam::DEFAULT_BAM_MEMORY_BUDGET_MIB,
             // TSV custom tracks
             tsv_data: None,
             tsv_path: String::new(),
@@ -1797,6 +1799,17 @@ impl GenomeViewer
         *self.features_promise.lock() = Some(promise);
     }
 
+    fn apply_bam_limits(&self, alignments: &mut bam::AlignmentData)
+    {
+        alignments.set_memory_budget_mib(self.bam_memory_budget_mib);
+    }
+
+    fn set_alignments(&mut self, mut alignments: bam::AlignmentData)
+    {
+        self.apply_bam_limits(&mut alignments);
+        self.alignments = Some(alignments);
+    }
+
     // BAM loading functions
     #[cfg(not(target_arch = "wasm32"))]
     fn load_bam(&mut self)
@@ -1816,7 +1829,7 @@ impl GenomeViewer
                     "Loaded BAM file with {} reference sequences (reads will be loaded on demand)",
                     num_refs
                 );
-                self.alignments = Some(alignments);
+                self.set_alignments(alignments);
             }
             Err(e) =>
             {
@@ -2192,7 +2205,7 @@ impl GenomeViewer
                             "Loaded BAM file with {} reference sequences (reads will be loaded on demand)",
                             num_refs
                         );
-                        self.alignments = Some(alignments.clone());
+                        self.set_alignments(alignments.clone());
                     }
                     Err(e) =>
                     {
@@ -2270,6 +2283,7 @@ impl GenomeViewer
                 .collect(),
             chromosome_sort,
             max_reads_display: self.max_reads_display,
+            bam_memory_budget_mib: self.bam_memory_budget_mib,
             tsv_label_font_size: self.tsv_label_font_size,
             tsv_label_font_monospace: self.tsv_label_font_monospace,
         }
@@ -2314,6 +2328,11 @@ impl GenomeViewer
 
         // Restore max reads display
         self.max_reads_display = session.max_reads_display;
+        self.bam_memory_budget_mib = session.bam_memory_budget_mib;
+        if let Some(alignments) = self.alignments.as_mut()
+        {
+            alignments.set_memory_budget_mib(self.bam_memory_budget_mib);
+        }
         self.tsv_label_font_size = session.tsv_label_font_size;
         self.tsv_label_font_monospace = session.tsv_label_font_monospace;
 
@@ -3441,6 +3460,36 @@ impl eframe::App for GenomeViewer
                                             "Current: {} reads",
                                             self.max_reads_display
                                         ));
+
+                                        ui.separator();
+                                        ui.label("BAM memory budget:");
+                                        let budget_changed = ui
+                                            .horizontal(|ui| {
+                                                ui.add(
+                                                    egui::Slider::new(
+                                                        &mut self.bam_memory_budget_mib,
+                                                        256..=65536,
+                                                    )
+                                                    .logarithmic(true)
+                                                    .text("MiB"),
+                                                )
+                                            })
+                                            .inner
+                                            .changed();
+                                        ui.label(format!(
+                                            "Current: {} MiB ({:.1} GiB)",
+                                            self.bam_memory_budget_mib,
+                                            self.bam_memory_budget_mib as f32 / 1024.0
+                                        ));
+                                        if budget_changed
+                                        {
+                                            if let Some(alignments) = self.alignments.as_mut()
+                                            {
+                                                alignments.set_memory_budget_mib(
+                                                    self.bam_memory_budget_mib,
+                                                );
+                                            }
+                                        }
                                     }
                                     else if track_type == TrackType::CustomTsv
                                     {

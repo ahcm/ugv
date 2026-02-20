@@ -39,6 +39,8 @@ pub struct Session
     pub chromosome_sort: String, // "Natural", "Alphabetical", or "Size"
     #[serde(default = "default_max_reads_display")]
     pub max_reads_display: usize,
+    #[serde(default = "default_bam_memory_budget_mib")]
+    pub bam_memory_budget_mib: usize,
     #[serde(default = "default_tsv_label_font_size")]
     pub tsv_label_font_size: f32,
     #[serde(default)]
@@ -48,6 +50,11 @@ pub struct Session
 fn default_max_reads_display() -> usize
 {
     1000
+}
+
+fn default_bam_memory_budget_mib() -> usize
+{
+    4096
 }
 
 impl Session
@@ -72,6 +79,7 @@ impl Session
             track_configs: Vec::new(),
             chromosome_sort: "Natural".to_string(),
             max_reads_display: 1000,
+            bam_memory_budget_mib: default_bam_memory_budget_mib(),
             tsv_label_font_size: default_tsv_label_font_size(),
             tsv_label_font_monospace: false,
         }
