@@ -20,6 +20,7 @@ use std::sync::Arc;
 // Memory management constants
 const MAX_LOADED_REGION_SIZE: usize = 10_000_000; // 10Mb max region
 const MAX_LOADED_ALIGNMENTS: usize = 100_000_000; // Max 100m reads
+const MAX_LOADED_ALIGNMENT_BYTES: usize = 4 * 1024 * 1024 * 1024; // 4 GiB soft cap
 const VIEWPORT_BUFFER_MIN: usize = 100_000; // 100Kb min buffer around viewport
 const VIEWPORT_BUFFER_MAX: usize = 2_000_000; // 2Mb max buffer around viewport
 
@@ -108,6 +109,18 @@ pub struct AlignmentRecord
 
 impl AlignmentRecord
 {
+    /// Estimate in-memory footprint (struct + owned heap allocations).
+    fn estimated_bytes(&self) -> usize
+    {
+        std::mem::size_of::<Self>()
+            + self.name.capacity()
+            + self.sequence.capacity() * std::mem::size_of::<u8>()
+            + self.quality_scores.capacity() * std::mem::size_of::<u8>()
+            + self.cigar.capacity() * std::mem::size_of::<CigarOp>()
+            + self.variants.capacity() * std::mem::size_of::<Variant>()
+            + self.methylation.capacity() * std::mem::size_of::<MethylationCall>()
+    }
+
     /// Check if read is mapped
     pub fn is_mapped(&self) -> bool
     {
@@ -553,6 +566,12 @@ impl Drop for RemoteBamStorage
 
 impl AlignmentData
 {
+    fn hit_alignment_limit(count: usize, loaded_bytes: usize, next_alignment_bytes: usize) -> bool
+    {
+        count >= MAX_LOADED_ALIGNMENTS
+            || loaded_bytes.saturating_add(next_alignment_bytes) > MAX_LOADED_ALIGNMENT_BYTES
+    }
+
     fn extract_reference_lengths(header: &sam::Header) -> HashMap<String, usize>
     {
         header
@@ -975,22 +994,25 @@ impl AlignmentData
                 let query = reader.query(&header, &region)?;
 
                 let mut count = 0;
+                let mut loaded_bytes = 0usize;
                 for result in query.records()
                 {
-                    if count >= MAX_LOADED_ALIGNMENTS
-                    {
-                        eprintln!(
-                            "Warning: Hit alignment limit of {} for region",
-                            MAX_LOADED_ALIGNMENTS
-                        );
-                        break;
-                    }
-
                     let record = result?;
                     if let Some(alignment) = Self::parse_record(&record)?
                     {
+                        let alignment_bytes = alignment.estimated_bytes();
+                        if Self::hit_alignment_limit(count, loaded_bytes, alignment_bytes)
+                        {
+                            eprintln!(
+                                "Warning: Hit loading limit for region (max {} alignments or {} MiB estimated)",
+                                MAX_LOADED_ALIGNMENTS,
+                                MAX_LOADED_ALIGNMENT_BYTES / (1024 * 1024)
+                            );
+                            break;
+                        }
                         track.records.push(alignment);
                         count += 1;
+                        loaded_bytes += alignment_bytes;
                     }
                 }
             }
@@ -1010,22 +1032,25 @@ impl AlignmentData
                     let query = reader.query(&header, &region)?;
 
                     let mut count = 0;
+                    let mut loaded_bytes = 0usize;
                     for result in query.records()
                     {
-                        if count >= MAX_LOADED_ALIGNMENTS
-                        {
-                            eprintln!(
-                                "Warning: Hit alignment limit of {} for region",
-                                MAX_LOADED_ALIGNMENTS
-                            );
-                            break;
-                        }
-
                         let record = result?;
                         if let Some(alignment) = Self::parse_record(&record)?
                         {
+                            let alignment_bytes = alignment.estimated_bytes();
+                            if Self::hit_alignment_limit(count, loaded_bytes, alignment_bytes)
+                            {
+                                eprintln!(
+                                    "Warning: Hit loading limit for region (max {} alignments or {} MiB estimated)",
+                                    MAX_LOADED_ALIGNMENTS,
+                                    MAX_LOADED_ALIGNMENT_BYTES / (1024 * 1024)
+                                );
+                                break;
+                            }
                             track.records.push(alignment);
                             count += 1;
+                            loaded_bytes += alignment_bytes;
                         }
                     }
                 }
@@ -1043,13 +1068,9 @@ impl AlignmentData
                 let header = reader.read_header()?;
 
                 let mut count = 0;
+                let mut loaded_bytes = 0usize;
                 for result in reader.records()
                 {
-                    if count >= MAX_LOADED_ALIGNMENTS
-                    {
-                        break;
-                    }
-
                     let record = result?;
 
                     // Check if record is in our region
@@ -1067,8 +1088,23 @@ impl AlignmentData
                                     {
                                         if let Some(alignment) = Self::parse_record(&record)?
                                         {
+                                            let alignment_bytes = alignment.estimated_bytes();
+                                            if Self::hit_alignment_limit(
+                                                count,
+                                                loaded_bytes,
+                                                alignment_bytes,
+                                            )
+                                            {
+                                                eprintln!(
+                                                    "Warning: Hit loading limit for region (max {} alignments or {} MiB estimated)",
+                                                    MAX_LOADED_ALIGNMENTS,
+                                                    MAX_LOADED_ALIGNMENT_BYTES / (1024 * 1024)
+                                                );
+                                                break;
+                                            }
                                             track.records.push(alignment);
                                             count += 1;
+                                            loaded_bytes += alignment_bytes;
                                         }
                                     }
                                 }
@@ -1137,17 +1173,9 @@ impl AlignmentData
         track.loaded_region = Some((0, reference_length));
 
         let mut count = 0;
+        let mut loaded_bytes = 0usize;
         for result in reader.records()
         {
-            if count >= MAX_LOADED_ALIGNMENTS
-            {
-                eprintln!(
-                    "Warning: Hit alignment limit of {} for chromosome",
-                    MAX_LOADED_ALIGNMENTS
-                );
-                break;
-            }
-
             let record = result?;
 
             // Check if this record belongs to our chromosome
@@ -1159,8 +1187,19 @@ impl AlignmentData
                     {
                         if let Some(alignment) = Self::parse_record(&record)?
                         {
+                            let alignment_bytes = alignment.estimated_bytes();
+                            if Self::hit_alignment_limit(count, loaded_bytes, alignment_bytes)
+                            {
+                                eprintln!(
+                                    "Warning: Hit loading limit for chromosome (max {} alignments or {} MiB estimated)",
+                                    MAX_LOADED_ALIGNMENTS,
+                                    MAX_LOADED_ALIGNMENT_BYTES / (1024 * 1024)
+                                );
+                                break;
+                            }
                             track.records.push(alignment);
                             count += 1;
+                            loaded_bytes += alignment_bytes;
                         }
                     }
                 }
