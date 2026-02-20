@@ -6,6 +6,8 @@ rust-version = "1.70"
 description = "Ultra-fast genome viewer for interactive exploration of genomic data"
 readme = "README.md"
 license = "EUPL-1.2"
+repository = "https://github.com/ahcm/ugv"
+homepage = "https://github.com/ahcm/ugv"
 keywords = ["genomics", "bioinformatics", "bam", "fasta", "viewer"]
 categories = ["science", "visualization"]
 
