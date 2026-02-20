@@ -4,7 +4,8 @@ script = [
     "echo Building for target: ${CARGO_MAKE_BUILD_TARGET:-host}",
     "cargo build --release",
     "mkdir -p bin",
-    "if [ -z \"${CARGO_MAKE_BUILD_TARGET}\" ]; then cp target/release/${CARGO_MAKE_CRATE_NAME} bin/${CARGO_MAKE_CRATE_NAME}-${CARGO_MAKE_CRATE_VERSION}; else cp target/${CARGO_MAKE_BUILD_TARGET}/release/${CARGO_MAKE_CRATE_NAME} bin/${CARGO_MAKE_CRATE_NAME}-${CARGO_MAKE_CRATE_VERSION}-${CARGO_MAKE_BUILD_TARGET}; fi",
+    "if [ -z \"${CARGO_MAKE_BUILD_TARGET}\" ]; then target_triple=$(rustc -vV | awk '/^host: / {print $2}'); source_path=target/release/${CARGO_MAKE_CRATE_NAME}; else target_triple=${CARGO_MAKE_BUILD_TARGET}; source_path=target/${CARGO_MAKE_BUILD_TARGET}/release/${CARGO_MAKE_CRATE_NAME}; fi",
+    "cp \"${source_path}\" \"bin/${CARGO_MAKE_CRATE_NAME}-${CARGO_MAKE_CRATE_VERSION}-${target_triple}\"",
 ]
 
 [tasks.wasm-cargo-build]
@@ -68,4 +69,3 @@ script = [
     "cargo install miniserve",
     "miniserve wasm -p 8080"
 ]
-
