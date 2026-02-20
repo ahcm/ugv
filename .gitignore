@@ -1,10 +1,6 @@
 /target
 /bin
 /wasm
+/test
 
 Cargo.lock
-
-# WebAssembly build artifacts
-ugv.js
-ugv_bg.wasm
-ugv_bg.wasm.d.ts
