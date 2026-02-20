@@ -157,6 +157,10 @@ enum TrackType
     Alignments,
     Variants,
     Methylation,
+    Coverage2,
+    Alignments2,
+    Variants2,
+    Methylation2,
     CustomTsv,
 }
 
@@ -208,6 +212,8 @@ struct GenomeViewer
     // BAM support
     alignments: Option<bam::AlignmentData>,
     bam_path: String,
+    alignments2: Option<bam::AlignmentData>,
+    bam2_path: String,
     max_reads_display: usize,
     bam_memory_budget_mib: usize,
     // TSV custom tracks
@@ -346,6 +352,10 @@ impl GenomeViewer
             "Alignments" => Some(TrackType::Alignments),
             "Variants" => Some(TrackType::Variants),
             "Methylation" => Some(TrackType::Methylation),
+            "Coverage2" => Some(TrackType::Coverage2),
+            "Alignments2" => Some(TrackType::Alignments2),
+            "Variants2" => Some(TrackType::Variants2),
+            "Methylation2" => Some(TrackType::Methylation2),
             "CustomTsv" => Some(TrackType::CustomTsv),
             _ => None,
         }
@@ -377,6 +387,8 @@ impl GenomeViewer
             // BAM support
             alignments: None,
             bam_path: String::new(),
+            alignments2: None,
+            bam2_path: String::new(),
             max_reads_display: 1000,
             bam_memory_budget_mib: bam::DEFAULT_BAM_MEMORY_BUDGET_MIB,
             // TSV custom tracks
@@ -435,7 +447,12 @@ impl GenomeViewer
         configs.insert(TrackType::Alignments, TrackConfig::new(TrackType::Alignments, 200.0, 6));
         configs.insert(TrackType::Variants, TrackConfig::new(TrackType::Variants, 50.0, 7));
         configs.insert(TrackType::Methylation, TrackConfig::new(TrackType::Methylation, 80.0, 8));
-        configs.insert(TrackType::CustomTsv, TrackConfig::new(TrackType::CustomTsv, 100.0, 9));
+        configs.insert(TrackType::Coverage2, TrackConfig::new(TrackType::Coverage2, 80.0, 9));
+        configs.insert(TrackType::Alignments2, TrackConfig::new(TrackType::Alignments2, 200.0, 10));
+        configs.insert(TrackType::Variants2, TrackConfig::new(TrackType::Variants2, 50.0, 11));
+        configs
+            .insert(TrackType::Methylation2, TrackConfig::new(TrackType::Methylation2, 80.0, 12));
+        configs.insert(TrackType::CustomTsv, TrackConfig::new(TrackType::CustomTsv, 100.0, 13));
 
         configs
     }
@@ -463,6 +480,10 @@ impl GenomeViewer
             TrackType::Alignments,
             TrackType::Variants,
             TrackType::Methylation,
+            TrackType::Coverage2,
+            TrackType::Alignments2,
+            TrackType::Variants2,
+            TrackType::Methylation2,
             TrackType::CustomTsv,
         ]
     }
@@ -565,6 +586,19 @@ impl GenomeViewer
             if let Some(chr) = genome.get_chromosome(chr_name)
             {
                 let bam_track = if let Some(ref mut alignments) = self.alignments
+                {
+                    match alignments.query_region(chr_name, self.viewport.start, self.viewport.end)
+                    {
+                        Ok(track) => track,
+                        Err(_) => None,
+                    }
+                }
+                else
+                {
+                    None
+                };
+
+                let bam_track2 = if let Some(ref mut alignments) = self.alignments2
                 {
                     match alignments.query_region(chr_name, self.viewport.start, self.viewport.end)
                     {
@@ -784,6 +818,103 @@ impl GenomeViewer
                                     y_offset,
                                     config.height,
                                     "Custom Track (load TSV file)",
+                                );
+                            }
+                        }
+                        TrackType::Coverage2 =>
+                        {
+                            if let Some(track) = bam_track2
+                            {
+                                y_offset = renderer::draw_coverage_track(
+                                    &svg_painter,
+                                    rect,
+                                    track,
+                                    &self.viewport,
+                                    y_offset,
+                                    config.height,
+                                );
+                            }
+                            else
+                            {
+                                y_offset = renderer::draw_empty_track(
+                                    &svg_painter,
+                                    rect,
+                                    y_offset,
+                                    config.height,
+                                    "Coverage #2 (load BAM #2)",
+                                );
+                            }
+                        }
+                        TrackType::Alignments2 =>
+                        {
+                            if let Some(track) = bam_track2
+                            {
+                                y_offset = renderer::draw_alignments(
+                                    &svg_painter,
+                                    rect,
+                                    track,
+                                    &self.viewport,
+                                    y_offset,
+                                    config.height,
+                                    self.max_reads_display,
+                                );
+                            }
+                            else
+                            {
+                                y_offset = renderer::draw_empty_track(
+                                    &svg_painter,
+                                    rect,
+                                    y_offset,
+                                    config.height,
+                                    "Alignments #2 (load BAM #2)",
+                                );
+                            }
+                        }
+                        TrackType::Variants2 =>
+                        {
+                            if let Some(track) = bam_track2
+                            {
+                                y_offset = renderer::draw_variant_summary(
+                                    &svg_painter,
+                                    rect,
+                                    track,
+                                    &self.viewport,
+                                    y_offset,
+                                    config.height,
+                                );
+                            }
+                            else
+                            {
+                                y_offset = renderer::draw_empty_track(
+                                    &svg_painter,
+                                    rect,
+                                    y_offset,
+                                    config.height,
+                                    "Variants #2 (load BAM #2)",
+                                );
+                            }
+                        }
+                        TrackType::Methylation2 =>
+                        {
+                            if let Some(track) = bam_track2
+                            {
+                                y_offset = renderer::draw_methylation_track(
+                                    &svg_painter,
+                                    rect,
+                                    track,
+                                    &self.viewport,
+                                    y_offset,
+                                    config.height,
+                                );
+                            }
+                            else
+                            {
+                                y_offset = renderer::draw_empty_track(
+                                    &svg_painter,
+                                    rect,
+                                    y_offset,
+                                    config.height,
+                                    "Methylation #2 (load BAM #2)",
                                 );
                             }
                         }
@@ -1810,6 +1941,12 @@ impl GenomeViewer
         self.alignments = Some(alignments);
     }
 
+    fn set_alignments2(&mut self, mut alignments: bam::AlignmentData)
+    {
+        self.apply_bam_limits(&mut alignments);
+        self.alignments2 = Some(alignments);
+    }
+
     // BAM loading functions
     #[cfg(not(target_arch = "wasm32"))]
     fn load_bam(&mut self)
@@ -1834,6 +1971,33 @@ impl GenomeViewer
             Err(e) =>
             {
                 self.status_message = format!("Error loading BAM: {}", e);
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn load_bam2(&mut self)
+    {
+        if self.bam2_path.is_empty()
+        {
+            self.status_message = "Error: No BAM #2 path specified".to_string();
+            return;
+        }
+
+        match bam::AlignmentData::from_path_or_url(&self.bam2_path)
+        {
+            Ok(alignments) =>
+            {
+                let num_refs = alignments.reference_lengths.len();
+                self.status_message = format!(
+                    "Loaded BAM #2 with {} reference sequences (reads will be loaded on demand)",
+                    num_refs
+                );
+                self.set_alignments2(alignments);
+            }
+            Err(e) =>
+            {
+                self.status_message = format!("Error loading BAM #2: {}", e);
             }
         }
     }
@@ -2240,6 +2404,7 @@ impl GenomeViewer
             fasta_path: self.fasta_path.clone(),
             gff_path: self.gff_path.clone(),
             bam_path: self.bam_path.clone(),
+            bam_path_2: self.bam2_path.clone(),
             tsv_path: self.tsv_path.clone(),
             selected_chromosome: self.selected_chromosome.clone(),
             viewport_start: self.viewport.start,
@@ -2296,6 +2461,7 @@ impl GenomeViewer
         self.fasta_path = session.fasta_path.clone();
         self.gff_path = session.gff_path.clone();
         self.bam_path = session.bam_path.clone();
+        self.bam2_path = session.bam_path_2.clone();
         self.tsv_path = session.tsv_path.clone();
 
         // Restore UI state
@@ -2330,6 +2496,10 @@ impl GenomeViewer
         self.max_reads_display = session.max_reads_display;
         self.bam_memory_budget_mib = session.bam_memory_budget_mib;
         if let Some(alignments) = self.alignments.as_mut()
+        {
+            alignments.set_memory_budget_mib(self.bam_memory_budget_mib);
+        }
+        if let Some(alignments) = self.alignments2.as_mut()
         {
             alignments.set_memory_budget_mib(self.bam_memory_budget_mib);
         }
@@ -2402,6 +2572,11 @@ impl GenomeViewer
         if !self.bam_path.is_empty()
         {
             self.load_bam();
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if !self.bam2_path.is_empty()
+        {
+            self.load_bam2();
         }
         if !self.tsv_path.is_empty()
         {
@@ -2949,6 +3124,47 @@ impl eframe::App for GenomeViewer
                             }
                         });
 
+                        #[cfg(not(target_arch = "wasm32"))]
+                        ui.horizontal(|ui| {
+                            ui.add_sized(
+                                [100.0, 20.0],
+                                egui::Label::new(egui::RichText::new("📊 BAM #2:").strong()),
+                            );
+
+                            if ui.button("Local").clicked()
+                            {
+                                if let Some(path) = rfd::FileDialog::new()
+                                    .add_filter("BAM", &["bam"])
+                                    .add_filter("All files", &["*"])
+                                    .pick_file()
+                                {
+                                    self.bam2_path = path.display().to_string();
+                                    self.load_bam2();
+                                }
+                            }
+
+                            ui.label("URL:");
+                            ui.add_sized(
+                                [300.0, 20.0],
+                                egui::TextEdit::singleline(&mut self.bam2_path)
+                                    .hint_text("https://..."),
+                            );
+                            if ui.button("Load URL").clicked()
+                            {
+                                self.load_bam2();
+                            }
+
+                            if !self.bam2_path.is_empty()
+                            {
+                                ui.label(
+                                    std::path::Path::new(&self.bam2_path)
+                                        .file_name()
+                                        .and_then(|n| n.to_str())
+                                        .unwrap_or(&self.bam2_path),
+                                );
+                            }
+                        });
+
                         // TSV custom track section
                         ui.horizontal(|ui| {
                             ui.add_sized(
@@ -3416,6 +3632,10 @@ impl eframe::App for GenomeViewer
                                         | TrackType::Alignments
                                         | TrackType::Variants
                                         | TrackType::Methylation
+                                        | TrackType::Coverage2
+                                        | TrackType::Alignments2
+                                        | TrackType::Variants2
+                                        | TrackType::Methylation2
                                         | TrackType::CustomTsv =>
                                         {
                                             let config_mut =
@@ -3443,6 +3663,7 @@ impl eframe::App for GenomeViewer
 
                                     // Alignments-specific controls
                                     if track_type == TrackType::Alignments
+                                        || track_type == TrackType::Alignments2
                                     {
                                         ui.separator();
                                         ui.label("Max reads to display:");
@@ -3484,6 +3705,12 @@ impl eframe::App for GenomeViewer
                                         if budget_changed
                                         {
                                             if let Some(alignments) = self.alignments.as_mut()
+                                            {
+                                                alignments.set_memory_budget_mib(
+                                                    self.bam_memory_budget_mib,
+                                                );
+                                            }
+                                            if let Some(alignments) = self.alignments2.as_mut()
                                             {
                                                 alignments.set_memory_budget_mib(
                                                     self.bam_memory_budget_mib,
@@ -3834,6 +4061,27 @@ impl eframe::App for GenomeViewer
                         None
                     };
 
+                    let bam_track2 = if let Some(ref mut alignments) = self.alignments2
+                    {
+                        match alignments.query_region(
+                            chr_name,
+                            self.viewport.start,
+                            self.viewport.end,
+                        )
+                        {
+                            Ok(track) => track,
+                            Err(e) =>
+                            {
+                                eprintln!("Error querying BAM #2 region: {}", e);
+                                None
+                            }
+                        }
+                    }
+                    else
+                    {
+                        None
+                    };
+
                     // Get TSV track if available
                     let tsv_track = self
                         .tsv_data
@@ -4065,6 +4313,120 @@ impl eframe::App for GenomeViewer
                                         y_offset,
                                         config.height,
                                         "Methylation (load BAM file)",
+                                    );
+                                }
+                                y_offset += TRACK_SPACING;
+                            }
+                            TrackType::Coverage2 =>
+                            {
+                                if let Some(track) = bam_track2
+                                {
+                                    y_offset = renderer::draw_coverage_track(
+                                        &painter,
+                                        response.rect,
+                                        track,
+                                        &self.viewport,
+                                        y_offset,
+                                        config.height,
+                                    );
+                                }
+                                else
+                                {
+                                    y_offset = renderer::draw_empty_track(
+                                        &painter,
+                                        response.rect,
+                                        y_offset,
+                                        config.height,
+                                        "Coverage #2 (load BAM #2)",
+                                    );
+                                }
+                                y_offset += TRACK_SPACING;
+                            }
+                            TrackType::Alignments2 =>
+                            {
+                                if let Some(track) = bam_track2
+                                {
+                                    y_offset = renderer::draw_alignments(
+                                        &painter,
+                                        response.rect,
+                                        track,
+                                        &self.viewport,
+                                        y_offset,
+                                        config.height,
+                                        self.max_reads_display,
+                                    );
+                                }
+                                else
+                                {
+                                    y_offset = renderer::draw_empty_track(
+                                        &painter,
+                                        response.rect,
+                                        y_offset,
+                                        config.height,
+                                        "Alignments #2 (load BAM #2)",
+                                    );
+                                }
+                                y_offset += TRACK_SPACING;
+                            }
+                            TrackType::Variants2 =>
+                            {
+                                if let Some(track) = bam_track2
+                                {
+                                    y_offset = renderer::draw_variant_summary(
+                                        &painter,
+                                        response.rect,
+                                        track,
+                                        &self.viewport,
+                                        y_offset,
+                                        config.height,
+                                    );
+                                }
+                                else
+                                {
+                                    y_offset = renderer::draw_empty_track(
+                                        &painter,
+                                        response.rect,
+                                        y_offset,
+                                        config.height,
+                                        "Variants #2 (load BAM #2)",
+                                    );
+                                }
+                                y_offset += TRACK_SPACING;
+                            }
+                            TrackType::Methylation2 =>
+                            {
+                                if let Some(track) = bam_track2
+                                {
+                                    if !track.methylation.is_empty()
+                                    {
+                                        y_offset = renderer::draw_methylation_track(
+                                            &painter,
+                                            response.rect,
+                                            track,
+                                            &self.viewport,
+                                            y_offset,
+                                            config.height,
+                                        );
+                                    }
+                                    else
+                                    {
+                                        y_offset = renderer::draw_empty_track(
+                                            &painter,
+                                            response.rect,
+                                            y_offset,
+                                            config.height,
+                                            "Methylation #2 (no data)",
+                                        );
+                                    }
+                                }
+                                else
+                                {
+                                    y_offset = renderer::draw_empty_track(
+                                        &painter,
+                                        response.rect,
+                                        y_offset,
+                                        config.height,
+                                        "Methylation #2 (load BAM #2)",
                                     );
                                 }
                                 y_offset += TRACK_SPACING;

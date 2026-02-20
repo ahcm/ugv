@@ -23,6 +23,8 @@ pub struct Session
     pub gff_path: String,
     pub bam_path: String,
     #[serde(default)]
+    pub bam_path_2: String,
+    #[serde(default)]
     pub tsv_path: String,
     pub selected_chromosome: Option<String>,
     pub viewport_start: usize,
@@ -66,6 +68,7 @@ impl Session
             fasta_path: String::new(),
             gff_path: String::new(),
             bam_path: String::new(),
+            bam_path_2: String::new(),
             tsv_path: String::new(),
             selected_chromosome: None,
             viewport_start: 0,
