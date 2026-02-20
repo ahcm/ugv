@@ -13,6 +13,8 @@ mod viewport;
 
 use anyhow::Result;
 use eframe::egui;
+#[cfg(not(target_arch = "wasm32"))]
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 
 const TRACK_SPACING: f32 = 10.0;
 const POSITION_HISTORY_LIMIT: usize = 10;
@@ -214,6 +216,26 @@ struct GenomeViewer
     bam_path: String,
     alignments2: Option<bam::AlignmentData>,
     bam2_path: String,
+    #[cfg(not(target_arch = "wasm32"))]
+    bam_cached_track: Option<bam::AlignmentTrack>,
+    #[cfg(not(target_arch = "wasm32"))]
+    bam_cached_track2: Option<bam::AlignmentTrack>,
+    #[cfg(not(target_arch = "wasm32"))]
+    bam_loading: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    bam_loading2: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    bam_result_rx: Option<Receiver<BamRegionResult>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    bam_result_rx2: Option<Receiver<BamRegionResult>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    bam_active_request: Option<BamRegionRequest>,
+    #[cfg(not(target_arch = "wasm32"))]
+    bam_active_request2: Option<BamRegionRequest>,
+    #[cfg(not(target_arch = "wasm32"))]
+    bam_pending_request: Option<BamRegionRequest>,
+    #[cfg(not(target_arch = "wasm32"))]
+    bam_pending_request2: Option<BamRegionRequest>,
     max_reads_display: usize,
     bam_memory_budget_mib: usize,
     // TSV custom tracks
@@ -287,6 +309,23 @@ struct LoadingProgress
     description: String,
     bytes_loaded: usize,
     total_bytes: Option<usize>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, PartialEq, Eq)]
+struct BamRegionRequest
+{
+    chromosome: String,
+    viewport_start: usize,
+    viewport_end: usize,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct BamRegionResult
+{
+    alignments: bam::AlignmentData,
+    track: Option<bam::AlignmentTrack>,
+    error: Option<String>,
 }
 
 fn format_bytes(bytes: usize) -> String
@@ -389,6 +428,26 @@ impl GenomeViewer
             bam_path: String::new(),
             alignments2: None,
             bam2_path: String::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            bam_cached_track: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            bam_cached_track2: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            bam_loading: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            bam_loading2: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            bam_result_rx: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            bam_result_rx2: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            bam_active_request: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            bam_active_request2: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            bam_pending_request: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            bam_pending_request2: None,
             max_reads_display: 1000,
             bam_memory_budget_mib: bam::DEFAULT_BAM_MEMORY_BUDGET_MIB,
             // TSV custom tracks
@@ -1939,12 +1998,217 @@ impl GenomeViewer
     {
         self.apply_bam_limits(&mut alignments);
         self.alignments = Some(alignments);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.bam_cached_track = None;
+            self.bam_loading = false;
+            self.bam_result_rx = None;
+            self.bam_active_request = None;
+            self.bam_pending_request = None;
+        }
     }
 
     fn set_alignments2(&mut self, mut alignments: bam::AlignmentData)
     {
         self.apply_bam_limits(&mut alignments);
         self.alignments2 = Some(alignments);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.bam_cached_track2 = None;
+            self.bam_loading2 = false;
+            self.bam_result_rx2 = None;
+            self.bam_active_request2 = None;
+            self.bam_pending_request2 = None;
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn cached_track_covers(track: &bam::AlignmentTrack, request: &BamRegionRequest) -> bool
+    {
+        if track.reference_name != request.chromosome
+        {
+            return false;
+        }
+        track
+            .loaded_region
+            .map(|(loaded_start, loaded_end)| {
+                request.viewport_start >= loaded_start && request.viewport_end <= loaded_end
+            })
+            .unwrap_or(false)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn request_bam_region_async(&mut self, request: BamRegionRequest)
+    {
+        if let Some(track) = self.bam_cached_track.as_ref()
+        {
+            if Self::cached_track_covers(track, &request)
+            {
+                return;
+            }
+        }
+        if self.bam_loading
+        {
+            self.bam_pending_request = Some(request);
+            return;
+        }
+
+        let Some(mut alignments) = self.alignments.take()
+        else
+        {
+            return;
+        };
+        let (tx, rx) = mpsc::channel::<BamRegionResult>();
+        let request_for_worker = request.clone();
+        std::thread::spawn(move || {
+            let (track, error) = match alignments.query_region(
+                &request_for_worker.chromosome,
+                request_for_worker.viewport_start,
+                request_for_worker.viewport_end,
+            )
+            {
+                Ok(track) => (track.cloned(), None),
+                Err(e) => (None, Some(e.to_string())),
+            };
+
+            let _ = tx.send(BamRegionResult {
+                alignments,
+                track,
+                error,
+            });
+        });
+
+        self.bam_loading = true;
+        self.bam_active_request = Some(request);
+        self.bam_result_rx = Some(rx);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn request_bam2_region_async(&mut self, request: BamRegionRequest)
+    {
+        if let Some(track) = self.bam_cached_track2.as_ref()
+        {
+            if Self::cached_track_covers(track, &request)
+            {
+                return;
+            }
+        }
+        if self.bam_loading2
+        {
+            self.bam_pending_request2 = Some(request);
+            return;
+        }
+
+        let Some(mut alignments) = self.alignments2.take()
+        else
+        {
+            return;
+        };
+        let (tx, rx) = mpsc::channel::<BamRegionResult>();
+        let request_for_worker = request.clone();
+        std::thread::spawn(move || {
+            let (track, error) = match alignments.query_region(
+                &request_for_worker.chromosome,
+                request_for_worker.viewport_start,
+                request_for_worker.viewport_end,
+            )
+            {
+                Ok(track) => (track.cloned(), None),
+                Err(e) => (None, Some(e.to_string())),
+            };
+
+            let _ = tx.send(BamRegionResult {
+                alignments,
+                track,
+                error,
+            });
+        });
+
+        self.bam_loading2 = true;
+        self.bam_active_request2 = Some(request);
+        self.bam_result_rx2 = Some(rx);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn poll_bam_region_result(&mut self)
+    {
+        let Some(rx) = self.bam_result_rx.take()
+        else
+        {
+            return;
+        };
+        match rx.try_recv()
+        {
+            Ok(result) =>
+            {
+                self.alignments = Some(result.alignments);
+                self.bam_loading = false;
+                self.bam_active_request = None;
+                if let Some(track) = result.track
+                {
+                    self.bam_cached_track = Some(track);
+                }
+                if let Some(error) = result.error
+                {
+                    self.status_message = format!("Error querying BAM region: {}", error);
+                }
+
+                if let Some(next_request) = self.bam_pending_request.take()
+                {
+                    self.request_bam_region_async(next_request);
+                }
+            }
+            Err(TryRecvError::Empty) =>
+            {
+                self.bam_result_rx = Some(rx);
+            }
+            Err(TryRecvError::Disconnected) =>
+            {
+                self.bam_loading = false;
+                self.bam_active_request = None;
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn poll_bam2_region_result(&mut self)
+    {
+        let Some(rx) = self.bam_result_rx2.take()
+        else
+        {
+            return;
+        };
+        match rx.try_recv()
+        {
+            Ok(result) =>
+            {
+                self.alignments2 = Some(result.alignments);
+                self.bam_loading2 = false;
+                self.bam_active_request2 = None;
+                if let Some(track) = result.track
+                {
+                    self.bam_cached_track2 = Some(track);
+                }
+                if let Some(error) = result.error
+                {
+                    self.status_message = format!("Error querying BAM #2 region: {}", error);
+                }
+
+                if let Some(next_request) = self.bam_pending_request2.take()
+                {
+                    self.request_bam2_region_async(next_request);
+                }
+            }
+            Err(TryRecvError::Empty) =>
+            {
+                self.bam_result_rx2 = Some(rx);
+            }
+            Err(TryRecvError::Disconnected) =>
+            {
+                self.bam_loading2 = false;
+                self.bam_active_request2 = None;
+            }
+        }
     }
 
     // BAM loading functions
@@ -2873,6 +3137,12 @@ impl eframe::App for GenomeViewer
         if self.ruler_selection_chr.as_ref() != self.selected_chromosome.as_ref()
         {
             self.clear_ruler_selection();
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.poll_bam_region_result();
+            self.poll_bam2_region_result();
         }
 
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
@@ -3984,109 +4254,136 @@ impl eframe::App for GenomeViewer
             let selection_for_ruler = self.active_selection().map(|(_, start, end)| (start, end));
 
             // Render genome using track configuration
-            if let (Some(ref mut genome), Some(ref chr_name)) =
-                (&mut self.genome, &self.selected_chromosome)
+            if let Some(chr_name) = self.selected_chromosome.clone()
             {
                 // Ensure chromosome is loaded (for indexed genomes)
-                if let Err(e) = genome.ensure_chromosome_loaded(chr_name)
+                if let Some(genome) = self.genome.as_mut()
                 {
-                    #[cfg(target_arch = "wasm32")]
-                    if e.to_string()
-                        .contains("WASM indexed genome requires async loading")
+                    if let Err(e) = genome.ensure_chromosome_loaded(&chr_name)
                     {
-                        // Check if we are already loading this chromosome
-                        let is_loading = self.loading_chromosome.as_deref() == Some(chr_name);
-                        let has_failed = self.failed_chromosomes.contains(chr_name);
-
-                        if !is_loading && !has_failed
+                        #[cfg(target_arch = "wasm32")]
+                        if e.to_string()
+                            .contains("WASM indexed genome requires async loading")
                         {
-                            self.status_message = format!("Loading chromosome {}...", chr_name);
-                            self.loading_progress = Some(LoadingProgress {
-                                description: format!("Loading {}...", chr_name),
-                                bytes_loaded: 0,
-                                total_bytes: None,
-                            });
-                            self.loading_chromosome = Some(chr_name.clone());
+                            // Check if we are already loading this chromosome
+                            let is_loading = self.loading_chromosome.as_deref() == Some(&chr_name);
+                            let has_failed = self.failed_chromosomes.contains(&chr_name);
 
-                            let chr = chr_name.clone();
-                            // Clone genome to move into async block (it's cheap for indexed genomes)
-                            let mut genome_clone = genome.clone();
-                            let promise = poll_promise::Promise::spawn_local(async move {
-                                genome_clone
-                                    .load_chromosome_async(&chr)
-                                    .await
-                                    .map(|_| genome_clone)
-                            });
+                            if !is_loading && !has_failed
+                            {
+                                self.status_message = format!("Loading chromosome {}...", chr_name);
+                                self.loading_progress = Some(LoadingProgress {
+                                    description: format!("Loading {}...", chr_name),
+                                    bytes_loaded: 0,
+                                    total_bytes: None,
+                                });
+                                self.loading_chromosome = Some(chr_name.clone());
 
-                            *self.genome_promise.lock() = Some(promise);
+                                let chr = chr_name.clone();
+                                // Clone genome to move into async block (it's cheap for indexed genomes)
+                                let mut genome_clone = genome.clone();
+                                let promise = poll_promise::Promise::spawn_local(async move {
+                                    genome_clone
+                                        .load_chromosome_async(&chr)
+                                        .await
+                                        .map(|_| genome_clone)
+                                });
+
+                                *self.genome_promise.lock() = Some(promise);
+                            }
+                            else if has_failed
+                            {
+                                // Keep the error message visible if it failed
+                                // self.status_message is already set by check_genome_promise
+                            }
                         }
-                        else if has_failed
+                        else
                         {
-                            // Keep the error message visible if it failed
-                            // self.status_message is already set by check_genome_promise
+                            self.status_message = format!("Error loading chromosome: {}", e);
                         }
-                    }
-                    else
-                    {
-                        self.status_message = format!("Error loading chromosome: {}", e);
-                    }
 
-                    #[cfg(not(target_arch = "wasm32"))]
-                    {
-                        self.status_message = format!("Error loading chromosome: {}", e);
+                        #[cfg(not(target_arch = "wasm32"))]
+                        {
+                            self.status_message = format!("Error loading chromosome: {}", e);
+                        }
                     }
                 }
 
-                if let Some(chr) = genome.get_chromosome(chr_name)
+                #[cfg(not(target_arch = "wasm32"))]
+                let (bam_track, bam_track2) = {
+                    let request = BamRegionRequest {
+                        chromosome: chr_name.clone(),
+                        viewport_start: self.viewport.start,
+                        viewport_end: self.viewport.end,
+                    };
+                    self.request_bam_region_async(request.clone());
+                    self.request_bam2_region_async(request.clone());
+
+                    let bam_track = self
+                        .bam_cached_track
+                        .as_ref()
+                        .filter(|track| Self::cached_track_covers(track, &request));
+                    let bam_track2 = self
+                        .bam_cached_track2
+                        .as_ref()
+                        .filter(|track| Self::cached_track_covers(track, &request));
+                    (bam_track, bam_track2)
+                };
+
+                #[cfg(target_arch = "wasm32")]
+                let bam_track = if let Some(ref mut alignments) = self.alignments
                 {
-                    // Query BAM region once if needed
-                    let bam_track = if let Some(ref mut alignments) = self.alignments
+                    match alignments.query_region(
+                        chr_name.as_str(),
+                        self.viewport.start,
+                        self.viewport.end,
+                    )
                     {
-                        match alignments.query_region(
-                            chr_name,
-                            self.viewport.start,
-                            self.viewport.end,
-                        )
+                        Ok(track) => track,
+                        Err(e) =>
                         {
-                            Ok(track) => track,
-                            Err(e) =>
-                            {
-                                eprintln!("Error querying BAM region: {}", e);
-                                None
-                            }
+                            eprintln!("Error querying BAM region: {}", e);
+                            None
                         }
                     }
-                    else
-                    {
-                        None
-                    };
+                }
+                else
+                {
+                    None
+                };
 
-                    let bam_track2 = if let Some(ref mut alignments) = self.alignments2
+                #[cfg(target_arch = "wasm32")]
+                let bam_track2 = if let Some(ref mut alignments) = self.alignments2
+                {
+                    match alignments.query_region(
+                        chr_name.as_str(),
+                        self.viewport.start,
+                        self.viewport.end,
+                    )
                     {
-                        match alignments.query_region(
-                            chr_name,
-                            self.viewport.start,
-                            self.viewport.end,
-                        )
+                        Ok(track) => track,
+                        Err(e) =>
                         {
-                            Ok(track) => track,
-                            Err(e) =>
-                            {
-                                eprintln!("Error querying BAM #2 region: {}", e);
-                                None
-                            }
+                            eprintln!("Error querying BAM #2 region: {}", e);
+                            None
                         }
                     }
-                    else
-                    {
-                        None
-                    };
+                }
+                else
+                {
+                    None
+                };
 
+                if let Some(chr) = self
+                    .genome
+                    .as_ref()
+                    .and_then(|genome| genome.get_chromosome(&chr_name))
+                {
                     // Get TSV track if available
                     let tsv_track = self
                         .tsv_data
                         .as_ref()
-                        .and_then(|data| data.tracks.get(chr_name));
+                        .and_then(|data| data.tracks.get(&chr_name));
 
                     // Render tracks in configured order
                     let mut y_offset = response.rect.top();
@@ -4109,7 +4406,7 @@ impl eframe::App for GenomeViewer
                                     &self.viewport,
                                     y_offset,
                                     config.height,
-                                    chr_name,
+                                    &chr_name,
                                     selection_for_ruler,
                                 );
                                 y_offset += TRACK_SPACING;
@@ -4186,7 +4483,7 @@ impl eframe::App for GenomeViewer
                                         &self.features,
                                         &self.viewport,
                                         tree,
-                                        chr_name,
+                                        &chr_name,
                                         y_offset,
                                         config.height,
                                     );
